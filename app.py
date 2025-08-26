@@ -3,9 +3,20 @@ import pandas as pd
 import numpy as np
 
 st.set_page_config(page_title="Bundle Builder – Stones Only (Cascade + Color + Origin)", layout="wide")
-st.title("💎 Bundle Builder – Stones Only")
-st.caption("Cascading filters (Gem → Shape → Size → Cut → Color → Country → Treatment) + averaging across all matched rows. The green line always shows Avg $/pc, Avg $/ct, and Avg Wt/pc when available.")
+st.title("💎 Jewelry Bundle Builder – Stone Cost Estimator")
 
+st.caption("""
+Easily explore gemstone options and estimate costs for rings, pendants, and earrings.  
+Select your center stone, side stones, and accents with real choices of shape, size, cut, color, treatment, and origin.  
+
+The app instantly calculates:
+- Transparent **average price per piece or carat**  
+- **Weight per stone**  
+- Line-by-line and total **stone bundle costs**
+
+Export your cost breakdown as a CSV for easy sharing.  
+Ideal for comparing options and preparing offers with clarity and confidence.
+""")
 # ---------- Data loading ----------
 @st.cache_data
 def load_master(xlsx_path="TEST.xlsx", sheet="MCGI_Master_Price"):
@@ -68,7 +79,7 @@ def cascade_options(df, gem=None, shape=None, size=None, cut=None):
             base4 = base4_exact
     colors = uniq(base4["Color"]) if "Color" in base4.columns else []
 
-    # Countries depend on gem+shape+size+cut+color(optional)
+    # Countries / Treatments depend on above
     base5 = base4.copy()
     countries = uniq(base5["Country of Origin"]) if "Country of Origin" in base5.columns else []
     treatments = uniq(base5["Stone Treatment"]) if "Stone Treatment" in base5.columns else []
@@ -82,7 +93,7 @@ def avg_price_lookup(df, gem, shape, size, cut=None, color=None, country=None, t
       - (average Price Per Carat US$) × (average Average Weight Per Piece)
     across all matched rows after applying all selected filters.
 
-    Returns: unit_cost, note, avg_row_dict (always includes any available averages),
+    Returns: unit_cost, note, avg_row_dict (includes any available averages),
              match_count, preview_df
     """
     q = df.copy()
@@ -113,7 +124,7 @@ def avg_price_lookup(df, gem, shape, size, cut=None, color=None, country=None, t
     if len(q) == 0:
         return None, "No exact match. Adjust filters (Gem/Shape/Size/Cut/Color/Country/Treatment).", None, 0, q
 
-    # Means (we'll report all available, regardless of which pricing mode is used)
+    # Means (report all available, regardless of pricing path)
     mean_ppp = q["Price Per Piece US$"].dropna().astype(float).mean() if "Price Per Piece US$" in q.columns else np.nan
     mean_ppc = q["Price Per Carat US$"].dropna().astype(float).mean() if "Price Per Carat US$" in q.columns else np.nan
     mean_awp = q["Average Weight Per Piece"].dropna().astype(float).mean() if "Average Weight Per Piece" in q.columns else np.nan
@@ -134,9 +145,9 @@ def avg_price_lookup(df, gem, shape, size, cut=None, color=None, country=None, t
         unit_cost = float(mean_ppc) * float(mean_awp)
         note = f"Used (average Price/ct × average Weight) across {len(q)} match(es)"
     else:
-        return None, "No usable pricing (need Price/pc OR (Price/ct & Avg Weight)).", avg_row if avg_row else None, len(q), q
+        return None, "No usable pricing (need Price/pc OR (Price/ct & Avg Weight)).", (avg_row or None), len(q), q
 
-    return unit_cost, note, avg_row if avg_row else None, len(q), q
+    return unit_cost, note, (avg_row or None), len(q), q
 
 # ---------- UI ----------
 def line_item(df, label):
@@ -183,21 +194,31 @@ def line_item(df, label):
         )
         if cost is not None:
             total = cost * qty
-            details = f"Unit cost: ${cost:,.4f}  •  Qty: {qty}  •  **Total: ${total:,.4f}**  ({note})"
 
-            # Always show any available averages (even if pricing used $/pc)
-            extra_bits = []
+            # ---- New professional formatting on the green line ----
+            # Line 1
+            line1 = (
+                f"Price Per Piece: US${cost:,.4f} (Currency) · "
+                f"Total Pieces: {qty} · "
+                f"**Total Price: US${total:,.4f} (Currency)** "
+                f"({note})"
+            )
+
+            # Line 2 (averages): show whatever is available
+            line2_bits = []
             if avg_row:
                 if "Average Price Per Piece US$" in avg_row:
-                    extra_bits.append(f"Avg $/pc: {avg_row['Average Price Per Piece US$']:.4f}")
+                    line2_bits.append(f"Avg Price per Piece: US${avg_row['Average Price Per Piece US$']:.4f} (Currency)")
                 if "Average Price Per Carat US$" in avg_row:
-                    extra_bits.append(f"Avg $/ct: {avg_row['Average Price Per Carat US$']:.4f}")
+                    line2_bits.append(f"Avg Price Carat: US${avg_row['Average Price Per Carat US$']:.4f} (Currency)")
                 if "Average Weight Per Piece" in avg_row:
-                    extra_bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f}")
-            if extra_bits:
-                details += "  •  " + "  •  ".join(extra_bits)
+                    line2_bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f} Carats")
+            line2 = " · ".join(line2_bits)
 
+            # Show with two lines inside the green box (Markdown supports line breaks with two spaces + \n)
+            details = line1 if not line2 else (line1 + "  \n" + line2)
             st.success(details)
+
             st.caption(f"Matched rows: {nmatch}")
             with st.expander(f"Preview matched rows ({min(len(preview), 50)} shown)"):
                 st.dataframe(preview.head(50))
@@ -218,7 +239,7 @@ def line_item(df, label):
         st.info("Pick Gemstone → Shape → Size (then optional Cut/Color/Country/Treatment) and set Qty.")
         return 0.0, None
 
-st.caption("Pricing source: MCGI_Master_Price (TEST.xlsx). Each dropdown narrows to valid choices from your data. Color & Country affect pricing when selected.")
+st.caption("Pricing source: MCGI Shipment Invoices to BBJ. Each dropdown narrows to valid choices from your data. Color & Country affect pricing when selected.")
 
 # Center
 center_total, center_meta = line_item(df, "Center Stone")
