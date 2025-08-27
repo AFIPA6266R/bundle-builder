@@ -1,2 +1,2 @@
-[tooltips]
-show = false
+[browser]
+gatherUsageStats = false
