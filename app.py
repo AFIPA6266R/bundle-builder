@@ -1,27 +1,37 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
+from pathlib import Path
+from datetime import datetime
 
-st.set_page_config(page_title="Bundle Builder – Stones Only (Cascade + Color + Origin)", layout="wide")
-st.title("💎 Jewelry Bundle Builder – Stone Cost Estimator")
+st.set_page_config(page_title="Gem Estimator Pro", layout="wide")
 
-st.caption("""
-Easily explore gemstone options and estimate costs for rings, pendants, and earrings.  
-Select your center stone, side stones, and accents with real choices of shape, size, cut, color, treatment, and origin.  
+# ---------- Styles ----------
+st.markdown(
+    """
+    <style>
+      /* tighten vertical rhythm a bit */
+      .block-container {padding-top: 1.25rem; padding-bottom: 2rem;}
+      div[data-testid="stHorizontalBlock"] > div {padding-right: .5rem;}
+      /* compact select/number widgets while still readable */
+      .stSelectbox, .stNumberInput, .stTextInput {margin-bottom: .4rem;}
+      label[for] {font-size: .80rem; color: #5b6770;}
+      /* make inputs height compact */
+      .stSelectbox div[role="combobox"], .stNumberInput input, .stTextInput input {
+        min-height: 38px;
+      }
+      /* keep dropdowns wide enough to show long values */
+      .auto-col {width: 100%;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-The app instantly calculates:
-- Transparent **average price per piece or carat**  
-- **Weight per stone**  
-- Line-by-line and total **stone bundle costs**
-
-Export your cost breakdown as a CSV for easy sharing.  
-Ideal for comparing options and preparing offers with clarity and confidence.
-""")
 # ---------- Data loading ----------
 @st.cache_data
 def load_master(xlsx_path="TEST.xlsx", sheet="MCGI_Master_Price"):
     df = pd.read_excel(xlsx_path, sheet_name=sheet)
-    # Normalize key text columns
     for c in [
         "Gemstone", "Shape", "Size", "Cut",
         "Color", "Country of Origin", "Stone Treatment",
@@ -31,71 +41,43 @@ def load_master(xlsx_path="TEST.xlsx", sheet="MCGI_Master_Price"):
             df[c] = df[c].astype(str).str.strip()
     return df
 
-df = load_master()
-
-# ---------- Helpers ----------
 def parse_size(s):
     if s is None:
         return None
     s = str(s).strip().lower().replace(" ", "")
-    s = s.replace("mm", "")
-    return s
+    return s.replace("mm","")
 
 def uniq(series):
-    """Return sorted unique non-empty strings from a Series."""
     return sorted([x for x in series.dropna().astype(str).unique() if str(x).strip() != ""])
 
 def cascade_options(df, gem=None, shape=None, size=None, cut=None):
-    """
-    Return cascaded option lists for size/cut/color/origin/treatment
-    based on current selections (gem, shape, size, cut).
-    """
     base = df.copy()
-
     if gem:
         base = base[base["Gemstone"].str.lower() == gem.strip().lower()]
-
-    # Shapes available within selected gem (or whole set if no gem)
     shapes = uniq(base["Shape"]) if "Shape" in base.columns else []
 
-    # Sizes depend on gem+shape
     base2 = base.copy()
     if shape:
         base2 = base2[base2["Shape"].str.lower() == shape.strip().lower()]
     sizes = uniq(base2["Size"]) if "Size" in base2.columns else []
 
-    # Cuts depend on gem+shape+(size optional)
     base3 = base2.copy()
     if size:
         key = parse_size(size)
         base3 = base3[base3["Size"].map(parse_size) == key]
     cuts = uniq(base3["Cut"]) if "Cut" in base3.columns else []
 
-    # Colors depend on gem+shape+size+cut(optional)
     base4 = base3.copy()
     if cut and "Cut" in base4.columns:
-        base4_exact = base4[base4["Cut"].str.lower() == cut.strip().lower()]
-        if len(base4_exact) > 0:
-            base4 = base4_exact
+        exact = base4[base4["Cut"].str.lower() == cut.strip().lower()]
+        if len(exact) > 0:
+            base4 = exact
     colors = uniq(base4["Color"]) if "Color" in base4.columns else []
-
-    # Countries / Treatments depend on above
-    base5 = base4.copy()
-    countries = uniq(base5["Country of Origin"]) if "Country of Origin" in base5.columns else []
-    treatments = uniq(base5["Stone Treatment"]) if "Stone Treatment" in base5.columns else []
-
+    countries = uniq(base4["Country of Origin"]) if "Country of Origin" in base4.columns else []
+    treatments = uniq(base4["Stone Treatment"]) if "Stone Treatment" in base4.columns else []
     return shapes, sizes, cuts, colors, countries, treatments
 
 def avg_price_lookup(df, gem, shape, size, cut=None, color=None, country=None, treatment=None):
-    """
-    Compute unit cost using either:
-      - average Price Per Piece US$, or
-      - (average Price Per Carat US$) × (average Average Weight Per Piece)
-    across all matched rows after applying all selected filters.
-
-    Returns: unit_cost, note, avg_row_dict (includes any available averages),
-             match_count, preview_df
-    """
     q = df.copy()
     if gem:
         q = q[q["Gemstone"].str.lower() == str(gem).strip().lower()]
@@ -106,82 +88,128 @@ def avg_price_lookup(df, gem, shape, size, cut=None, color=None, country=None, t
         q = q[q["Size"].map(parse_size) == key]
     if cut and "Cut" in q.columns:
         qq = q[q["Cut"].str.lower() == str(cut).strip().lower()]
-        if len(qq) > 0:
-            q = qq
+        if len(qq) > 0: q = qq
     if color and "Color" in q.columns:
         qq = q[q["Color"].str.lower() == str(color).strip().lower()]
-        if len(qq) > 0:
-            q = qq
+        if len(qq) > 0: q = qq
     if country and "Country of Origin" in q.columns:
         qq = q[q["Country of Origin"].str.lower() == str(country).strip().lower()]
-        if len(qq) > 0:
-            q = qq
+        if len(qq) > 0: q = qq
     if treatment and "Stone Treatment" in q.columns:
         qq = q[q["Stone Treatment"].str.lower() == str(treatment).strip().lower()]
-        if len(qq) > 0:
-            q = qq
+        if len(qq) > 0: q = qq
 
     if len(q) == 0:
-        return None, "No exact match. Adjust filters (Gem/Shape/Size/Cut/Color/Country/Treatment).", None, 0, q
+        return None, "No exact match. Adjust filters.", None, 0, q
 
-    # Means (report all available, regardless of pricing path)
     mean_ppp = q["Price Per Piece US$"].dropna().astype(float).mean() if "Price Per Piece US$" in q.columns else np.nan
     mean_ppc = q["Price Per Carat US$"].dropna().astype(float).mean() if "Price Per Carat US$" in q.columns else np.nan
     mean_awp = q["Average Weight Per Piece"].dropna().astype(float).mean() if "Average Weight Per Piece" in q.columns else np.nan
 
     avg_row = {}
-    if pd.notna(mean_ppp):
-        avg_row["Average Price Per Piece US$"] = float(mean_ppp)
-    if pd.notna(mean_ppc):
-        avg_row["Average Price Per Carat US$"] = float(mean_ppc)
-    if pd.notna(mean_awp):
-        avg_row["Average Weight Per Piece"] = float(mean_awp)
+    if pd.notna(mean_ppp): avg_row["Average Price Per Piece US$"] = float(mean_ppp)
+    if pd.notna(mean_ppc): avg_row["Average Price Per Carat US$"] = float(mean_ppc)
+    if pd.notna(mean_awp): avg_row["Average Weight Per Piece"] = float(mean_awp)
 
-    # Decide pricing path
     if pd.notna(mean_ppp):
         unit_cost = float(mean_ppp)
-        note = f"Used average Price Per Piece across {len(q)} match(es)"
+        note = f"Used average Price/pc across {len(q)} match(es)"
     elif pd.notna(mean_ppc) and pd.notna(mean_awp):
         unit_cost = float(mean_ppc) * float(mean_awp)
-        note = f"Used (average Price/ct × average Weight) across {len(q)} match(es)"
+        note = f"Used (avg Price/ct × avg Wt/pc) across {len(q)} match(es)"
     else:
-        return None, "No usable pricing (need Price/pc OR (Price/ct & Avg Weight)).", (avg_row or None), len(q), q
+        return None, "No usable pricing (need Price/pc OR (Price/ct & Avg Wt)).", (avg_row or None), len(q), q
 
     return unit_cost, note, (avg_row or None), len(q), q
 
-# ---------- UI ----------
-def line_item(df, label):
-    st.markdown(f"#### {label}")
+# ---------- Sidebar: file controls ----------
+with st.sidebar:
+    st.subheader("Data Source")
+    file_path = st.text_input(
+        "Excel file path", value="TEST.xlsx", key="file_path_input"
+    )
+    sheet_name = st.text_input(
+        "Sheet name", value="MCGI_Master_Price", key="sheet_name_input"
+    )
+    col1, col2 = st.columns([1,1])
+    with col1:
+        reloaded = st.button("Reload data", use_container_width=True)
+    with col2:
+        show_head = st.toggle("Preview 20 rows", value=False)
 
-    # Step 1: GEM
-    gems = [""] + uniq(df["Gemstone"])
-    gem = st.selectbox(f"{label} – Gemstone", gems, index=0, key=f"{label}_gem")
+# Load data (reload when user clicks or path/sheet changes)
+if reloaded:
+    load_master.clear()
 
-    # Step 2: SHAPE (depends on gem)
-    shapes, sizes_all, cuts_all, colors_all, countries_all, trts_all = cascade_options(df, gem=gem or None)
-    shapes = [""] + shapes
-    shape = st.selectbox(f"{label} – Shape", shapes, index=0, key=f"{label}_shape")
+df = load_master(file_path, sheet_name)
 
-    # Step 3: SIZE (depends on gem+shape)
-    _, sizes, cuts_all2, colors_all2, countries_all2, trts_all2 = cascade_options(df, gem=gem or None, shape=shape or None)
-    sizes = [""] + sizes
-    size = st.selectbox(f"{label} – Size", sizes, index=0, key=f"{label}_size")
+if show_head:
+    st.dataframe(df.head(20), use_container_width=True)
 
-    # Step 4: CUT/COLOR/COUNTRY/TREATMENT (depend on gem+shape+size)
-    _, _, cuts, colors, countries, treatments = cascade_options(df, gem=gem or None, shape=shape or None, size=size or None)
-    cuts = [""] + cuts
-    cut = st.selectbox(f"{label} – Cut", cuts, index=0, key=f"{label}_cut")
+# ---------- Header ----------
+st.title("💎 Gem Estimator Pro")
+st.caption(
+    "Cascading filters **(Gem → Shape → Size → Cut → Color → Country → Treatment)** with average pricing. "
+    "Tabs keep scrolling minimal. Columns auto-size so longer fields (Country/Treatment) fit comfortably. "
+    "Source: MCGI Shipment Invoices to BBJ."
+)
 
-    color_choices = ["(any)"] + colors
-    color = st.selectbox(f"{label} – Color (optional)", color_choices, index=0, key=f"{label}_color")
+# ---------- Line item UI ----------
+def line_item(df, label, key_prefix):
+    st.markdown(f"**{label}**")
 
-    country_choices = ["(any)"] + countries
-    country = st.selectbox(f"{label} – Country of Origin (optional)", country_choices, index=0, key=f"{label}_country")
+    # Cascade lists
+    shapes0, sizes0, cuts0, colors0, countries0, trts0 = cascade_options(df)
 
-    trt_choices = ["(any)"] + treatments
-    treatment = st.selectbox(f"{label} – Treatment (optional)", trt_choices, index=0, key=f"{label}_trt")
+    # Row 1: Gem, Shape, Size, Cut, Color, Country, Treatment, Qty
+    c1,c2,c3,c4,c5,c6,c7,c8 = st.columns([1.2,1.2,0.9,1.0,1.2,1.5,1.5,0.6])
 
-    qty = st.number_input(f"{label} – Pieces", min_value=0, value=1, step=1, key=f"{label}_qty")
+    with c1:
+        gem = st.selectbox(
+            "Gem", [""] + uniq(df["Gemstone"]),
+            index=0, key=f"{key_prefix}_gem", label_visibility="collapsed", help="Gemstone"
+        )
+    with c2:
+        shapes,_,_,_,_,_ = cascade_options(df, gem=gem or None)
+        shape = st.selectbox(
+            "Shape", [""] + shapes,
+            index=0, key=f"{key_prefix}_shape", label_visibility="collapsed", help="Shape"
+        )
+    with c3:
+        _,sizes,_,_,_,_ = cascade_options(df, gem=gem or None, shape=shape or None)
+        size = st.selectbox(
+            "Size", [""] + sizes,
+            index=0, key=f"{key_prefix}_size", label_visibility="collapsed", help="Size"
+        )
+    with c4:
+        _,_,cuts,_,_,_ = cascade_options(df, gem=gem or None, shape=shape or None, size=size or None)
+        cut = st.selectbox(
+            "Cut", [""] + cuts,
+            index=0, key=f"{key_prefix}_cut", label_visibility="collapsed", help="Cut"
+        )
+    with c5:
+        _,_,_,colors,_,_ = cascade_options(df, gem=gem or None, shape=shape or None, size=size or None)
+        color = st.selectbox(
+            "Color (optional)", ["(any)"] + colors,
+            index=0, key=f"{key_prefix}_color", label_visibility="collapsed", help="Color"
+        )
+    with c6:
+        _,_,_,_,countries,_ = cascade_options(df, gem=gem or None, shape=shape or None, size=size or None, cut=cut or None)
+        country = st.selectbox(
+            "Country of Origin (optional)", ["(any)"] + countries,
+            index=0, key=f"{key_prefix}_country", label_visibility="collapsed", help="Country"
+        )
+    with c7:
+        _,_,_,_,_,treatments = cascade_options(df, gem=gem or None, shape=shape or None, size=size or None, cut=cut or None)
+        treatment = st.selectbox(
+            "Treatment (optional)", ["(any)"] + treatments,
+            index=0, key=f"{key_prefix}_treat", label_visibility="collapsed", help="Treatment"
+        )
+    with c8:
+        qty = st.number_input(
+            "Qty", min_value=0, value=1, step=1,
+            key=f"{key_prefix}_qty", label_visibility="collapsed", help="Pieces"
+        )
 
     use_color = None if color == "(any)" else color
     use_country = None if country == "(any)" else country
@@ -189,103 +217,102 @@ def line_item(df, label):
 
     if qty > 0 and gem and shape and size:
         cost, note, avg_row, nmatch, preview = avg_price_lookup(
-            df, gem, shape, size,
-            cut or None, use_color, use_country, use_treat
+            df, gem, shape, size, cut or None, use_color, use_country, use_treat
         )
         if cost is not None:
             total = cost * qty
-
-            # ---- New professional formatting on the green line ----
-            # Line 1
             line1 = (
-                f"Price Per Piece: US${cost:,.4f} (Currency) · "
-                f"Total Pieces: {qty} · "
-                f"**Total Price: US${total:,.4f} (Currency)** "
-                f"({note})"
+                f"Price Per Piece: **US${cost:,.4f}** · Qty: **{qty}** · "
+                f"**Line Total: US${total:,.4f}**  ({note})"
             )
-
-            # Line 2 (averages): show whatever is available
-            line2_bits = []
+            bits = []
             if avg_row:
                 if "Average Price Per Piece US$" in avg_row:
-                    line2_bits.append(f"Avg Price per Piece: US${avg_row['Average Price Per Piece US$']:.4f} (Currency)")
+                    bits.append(f"Avg/pc: US${avg_row['Average Price Per Piece US$']:.4f}")
                 if "Average Price Per Carat US$" in avg_row:
-                    line2_bits.append(f"Avg Price Carat: US${avg_row['Average Price Per Carat US$']:.4f} (Currency)")
+                    bits.append(f"Avg/ct: US${avg_row['Average Price Per Carat US$']:.4f}")
                 if "Average Weight Per Piece" in avg_row:
-                    line2_bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f} Carats")
-            line2 = " · ".join(line2_bits)
+                    bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f} ct")
+            line2 = " · ".join(bits)
+            st.success(line1 + ("" if not line2 else f"  \n{line2}"))
 
-            # Show with two lines inside the green box (Markdown supports line breaks with two spaces + \n)
-            details = line1 if not line2 else (line1 + "  \n" + line2)
-            st.success(details)
-
-            st.caption(f"Matched rows: {nmatch}")
-            with st.expander(f"Preview matched rows ({min(len(preview), 50)} shown)"):
-                st.dataframe(preview.head(50))
+            with st.expander(f"Preview matched rows ({min(len(preview),50)} shown)"):
+                st.dataframe(preview.head(50), use_container_width=True)
 
             return total, {
                 "gem": gem, "shape": shape, "size": size, "cut": cut or "",
                 "color": use_color, "country": use_country, "treatment": use_treat,
                 "qty": qty, "unit_cost": cost, "note": note, "matches": nmatch
             }
-
         else:
             st.error(note or "Could not price this line.")
             if len(preview) > 0:
                 with st.expander("Matched rows we found (first 50)"):
-                    st.dataframe(preview.head(50))
+                    st.dataframe(preview.head(50), use_container_width=True)
             return 0.0, None
     else:
-        st.info("Pick Gemstone → Shape → Size (then optional Cut/Color/Country/Treatment) and set Qty.")
+        st.info("Pick Gem → Shape → Size (then optional Cut/Color/Country/Treatment) and set Qty.")
         return 0.0, None
 
-st.caption("Pricing source: MCGI Shipment Invoices to BBJ. Each dropdown narrows to valid choices from your data. Color & Country affect pricing when selected.")
+# ---------- Tabs ----------
+tab_center, tab_side, tab_acc, tab_sum = st.tabs(["Center", "Side Stones", "Accents", "Summary"])
 
-# Center
-center_total, center_meta = line_item(df, "Center Stone")
+with tab_center:
+    st.text_input(
+        "Notes (optional)", "", placeholder="Notes (optional)…",
+        key="notes_center", label_visibility="visible"
+    )
+    center_total, center_meta = line_item(df, "Line 1", key_prefix="center")
 
-# Side stones
-st.divider()
-st.subheader("Side Stones")
-side_count = st.number_input("How many side stone lines?", min_value=0, max_value=10, value=2, step=1)
-side_tot = 0.0
-side_lines = []
-for i in range(int(side_count)):
-    tot, meta = line_item(df, f"Side #{i+1}")
-    side_tot += tot
-    if meta:
-        side_lines.append(meta)
+with tab_side:
+    col = st.columns([1,7])[0]
+    with col:
+        side_lines_count = st.number_input("Number of side lines", 0, 10, 1, 1, key="side_count")
+    side_tot = 0.0
+    side_lines = []
+    for i in range(int(side_lines_count)):
+        tot, meta = line_item(df, f"Line {i+1}", key_prefix=f"side_{i+1}")
+        side_tot += tot
+        if meta: side_lines.append(meta)
 
-# Accents
-st.divider()
-st.subheader("Accents")
-acc_count = st.number_input("How many accent lines?", min_value=0, max_value=20, value=1, step=1)
-acc_tot = 0.0
-acc_lines = []
-for i in range(int(acc_count)):
-    tot, meta = line_item(df, f"Accent #{i+1}")
-    acc_tot += tot
-    if meta:
-        acc_lines.append(meta)
+with tab_acc:
+    col = st.columns([1,7])[0]
+    with col:
+        acc_lines_count = st.number_input("Number of accent lines", 0, 20, 1, 1, key="acc_count")
+    acc_tot = 0.0
+    acc_lines = []
+    for i in range(int(acc_lines_count)):
+        tot, meta = line_item(df, f"Line {i+1}", key_prefix=f"acc_{i+1}")
+        acc_tot += tot
+        if meta: acc_lines.append(meta)
 
-# Summary
-st.divider()
-grand = center_total + side_tot + acc_tot
-k1,k2,k3,k4 = st.columns(4)
-k1.metric("Center Stones", f"${center_total:,.4f}")
-k2.metric("Side Stones", f"${side_tot:,.4f}")
-k3.metric("Accents", f"${acc_tot:,.4f}")
-k4.metric("Total Stone Cost", f"${grand:,.4f}")
+with tab_sum:
+    # compute totals
+    if "center_total" not in st.session_state:
+        pass
+    grand = (center_total or 0.0) + (side_tot if 'side_tot' in locals() else 0.0) + (acc_tot if 'acc_tot' in locals() else 0.0)
 
-summary_df = pd.DataFrame([{
-    "center_total": center_total,
-    "side_total": side_tot,
-    "acc_total": acc_tot,
-    "grand_total": grand
-}])
-st.download_button(
-    "Download bundle breakdown (CSV)",
-    summary_df.to_csv(index=False).encode("utf-8"),
-    "bundle_cost_summary.csv",
-    "text/csv"
-)
+    k1,k2,k3,k4 = st.columns(4)
+    k1.metric("Center Stones", f"${(center_total or 0.0):,.4f}")
+    k2.metric("Side Stones", f"${(side_tot if 'side_tot' in locals() else 0.0):,.4f}")
+    k3.metric("Accents", f"${(acc_tot if 'acc_tot' in locals() else 0.0):,.4f}")
+    k4.metric("Total Stone Cost", f"${grand:,.4f}")
+
+    # Download summary
+    summary_df = pd.DataFrame([{
+        "center_total": center_total or 0.0,
+        "side_total": side_tot if 'side_tot' in locals() else 0.0,
+        "acc_total": acc_tot if 'acc_tot' in locals() else 0.0,
+        "grand_total": grand,
+        "notes": st.session_state.get("notes_center",""),
+        "source_file": str(Path(file_path).resolve()),
+        "sheet": sheet_name,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+    }])
+    st.download_button(
+        "Download bundle breakdown (CSV)",
+        summary_df.to_csv(index=False).encode("utf-8"),
+        "bundle_cost_summary.csv",
+        "text/csv",
+        use_container_width=True,
+    )
