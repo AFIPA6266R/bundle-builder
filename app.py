@@ -50,18 +50,11 @@ def load_master(xlsx_path="TEST.xlsx", sheet="MCGI_Master_Price"):
                 df[c] = df[c].astype(str).str.strip()
     return df
 
-with st.sidebar:
-    st.subheader("Data source")
-    sheet_name = st.text_input(
-        "Excel sheet name", "MCGI_Master_Price", help="Sheet inside TEST.xlsx", key="sheet_name"
-    )
-    st.caption("If you replace **TEST.xlsx**, the app will reload automatically on the next run.")
-    try:
-        df = load_master(sheet=sheet_name)
-        st.success("Loaded data ✅")
-    except Exception as e:
-        st.error(f"Failed to load Excel: {e}")
-        st.stop()
+try:
+    df = load_master(sheet="MCGI_Master_Price")
+except Exception as e:
+    st.error(f"Failed to load Excel: {e}")
+    st.stop()
 
 # ---------- Helpers ----------
 def parse_size(s):
