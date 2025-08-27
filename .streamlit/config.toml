@@ -1,2 +1,6 @@
-[browser]
-gatherUsageStats = false
+[server]
+runOnSave = false
+
+[global]
+showSidebar = true
+showToolbar = false
