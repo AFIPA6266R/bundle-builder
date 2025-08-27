@@ -22,6 +22,17 @@ st.markdown(
       .note {font-size:.9rem;color:#666;}
       .caption-tight {margin-top:-6px;color:#7a7a7a;}
       .hdr {font-weight:600;letter-spacing:.2px;color:#334;}
+
+      /* Custom CSS to prevent partial hiding in tables */
+      .st-b0, .st-b1, .st-b2, .st-b3 {
+        padding: 0.25rem 0.5rem;
+      }
+
+      /* This is the key change to make the cell content visible */
+      .stDataFrame td div {
+          white-space: nowrap;
+          overflow: visible;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -39,7 +50,7 @@ st.caption(
 def load_master(xlsx_path="TEST.xlsx", sheet="MCGI_Master_Price"):
     df = pd.read_excel(xlsx_path, sheet_name=sheet)
     for c in [
-        "Gemstone", "Shape", "Size", "Cut",
+        "Gemstone", "Shape", "Size",
         "Color", "Country of Origin", "Stone Treatment",
         "Unit Of Measure", "Price Per Piece US$", "Price Per Carat US$", "Average Weight Per Piece"
     ]:
@@ -240,13 +251,13 @@ def line_item(df, header, key_prefix):
             st.success(line1 + ("" if not line2 else "  \n" + line2))
             st.caption(f"Matched rows: {nmatch}")
             with st.expander(f"Preview matched rows ({min(len(preview), 50)} shown)"):
-                st.dataframe(preview.head(50))
+                st.dataframe(preview.head(50), use_container_width=True, hide_index=True)
             return total, item_details
         else:
             st.error(note or "Could not price this line.")
             if len(preview) > 0:
                 with st.expander("Matched rows we found (first 50)"):
-                    st.dataframe(preview.head(50))
+                    st.dataframe(preview.head(50), use_container_width=True, hide_index=True)
             return 0.0, None
     else:
         st.info("Pick Gemstone → Shape → Size (optional Cut/Color/Country/Treatment) and set Qty.")
@@ -482,7 +493,7 @@ with tab_metal:
         rows.append({"Metal": "Steel", "USD/gram": None if steel_g is None else round(steel_g, 4)})
 
         metal_df = pd.DataFrame(rows)
-        st.dataframe(metal_df, use_container_width=True)
+        st.dataframe(metal_df, use_container_width=True, hide_index=True)
 
         st.caption(
             "Formulas: Silver = (oz × 32.148 × yield × finishing) / 1000 ; "
@@ -510,6 +521,7 @@ with tab_metal:
                     "Product Type": prod,
                     "Metal": metal,
                     "Purity": purity_choice,
+                    "Plating": plating,
                     "Weight (grams)": approx_weight,
                     "Unit Cost ($/g)": current_metal_gram_cost,
                     "Total Cost": final_metal_cost,
@@ -551,20 +563,24 @@ with tab_summary:
     
     st.subheader("Order Summary")
 
-    # Prepare data for a single DataFrame
-    breakdown_rows = []
+    # Prepare data for stone table
+    stone_rows = []
     
     # Add Center Stone
     if st.session_state.center_details and st.session_state.center_details["total_cost"] > 0:
         d = st.session_state.center_details
-        breakdown_rows.append({
+        stone_rows.append({
             "Category": "Center Stone",
-            "Gemstone": d['gem'],
+            "Stone": d['gem'],
+            "Description": d['gem'],
+            "Cut": d['cut'],
             "Shape": d['shape'],
             "Size": d['size'],
+            "Origin": d['country'],
+            "Treatment": d['treatment'],
             "Pieces": d['qty'],
-            "Unit Price (USD)": f"${d['unit_cost']:,.2f}",
-            "Total Price (USD)": f"${d['total_cost']:,.2f}"
+            "Total Stone ($)": d['total_cost'],
+            "Unit Price ($)": d['unit_cost'],
         })
         grand_stone_total += d['total_cost']
 
@@ -572,14 +588,18 @@ with tab_summary:
     if st.session_state.side_lines:
         for d in st.session_state.side_lines:
             if d["total_cost"] > 0:
-                breakdown_rows.append({
+                stone_rows.append({
                     "Category": "Side Stone",
-                    "Gemstone": d['gem'],
+                    "Stone": d['gem'],
+                    "Description": d['gem'],
+                    "Cut": d['cut'],
                     "Shape": d['shape'],
                     "Size": d['size'],
+                    "Origin": d['country'],
+                    "Treatment": d['treatment'],
                     "Pieces": d['qty'],
-                    "Unit Price (USD)": f"${d['unit_cost']:,.2f}",
-                    "Total Price (USD)": f"${d['total_cost']:,.2f}"
+                    "Total Stone ($)": d['total_cost'],
+                    "Unit Price ($)": d['unit_cost'],
                 })
                 grand_stone_total += d['total_cost']
 
@@ -587,38 +607,59 @@ with tab_summary:
     if st.session_state.acc_lines:
         for d in st.session_state.acc_lines:
             if d["total_cost"] > 0:
-                breakdown_rows.append({
+                stone_rows.append({
                     "Category": "Accent",
-                    "Gemstone": d['gem'],
+                    "Stone": d['gem'],
+                    "Description": d['gem'],
+                    "Cut": d['cut'],
                     "Shape": d['shape'],
                     "Size": d['size'],
+                    "Origin": d['country'],
+                    "Treatment": d['treatment'],
                     "Pieces": d['qty'],
-                    "Unit Price (USD)": f"${d['unit_cost']:,.2f}",
-                    "Total Price (USD)": f"${d['total_cost']:,.2f}"
+                    "Total Stone ($)": d['total_cost'],
+                    "Unit Price ($)": d['unit_cost'],
                 })
                 grand_stone_total += d['total_cost']
 
-    # Add Metal
+    # Display Stone Table
+    if stone_rows:
+        stone_df = pd.DataFrame(stone_rows)
+        st.subheader("Stone Summary")
+        st.dataframe(stone_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No stones have been selected yet.")
+        
+    st.markdown("---")
+    
+    # Prepare data for metal table
+    metal_rows = []
     grand_metal_total = 0.0
     if st.session_state.metal_details and st.session_state.metal_details["Total Cost"] > 0:
         d = st.session_state.metal_details
-        breakdown_rows.append({
+        metal_rows.append({
             "Category": "Metal",
+            "Product": d['Product Type'],
             "Metal": d['Metal'],
-            "Purity": d['Purity'],
+            "Plating": d['Plating'],
             "Weight (grams)": d['Weight (grams)'],
-            "Unit Price (USD)": f"${d['Unit Cost ($/g)']:.2f}",
-            "Total Price (USD)": f"${d['Total Cost']:,.2f}"
+            "Unit Price ($/g)": d['Unit Cost ($/g)'],
+            "Total Cost ($)": d['Total Cost'],
         })
         grand_metal_total = d['Total Cost']
-
-    if breakdown_rows:
-        breakdown_df = pd.DataFrame(breakdown_rows)
-        st.dataframe(breakdown_df, use_container_width=True)
+        
+    # Display Metal Table
+    if metal_rows:
+        metal_df = pd.DataFrame(metal_rows)
+        st.subheader("Metal Summary")
+        st.dataframe(metal_df, use_container_width=True, hide_index=True)
     else:
-        st.info("No items have been selected yet. Please go to the other tabs to build your order.")
+        st.info("No metal has been selected yet.")
+
 
     grand_total_unit_cost = grand_stone_total + grand_metal_total
+    
+    st.markdown("---")
 
     k1, k2, k3 = st.columns(3)
     k1.metric("Total Stone Cost", f"${grand_stone_total:,.2f}")
@@ -628,21 +669,30 @@ with tab_summary:
     st.markdown("---")
     st.info("Disclaimer: These are approximate base costs without markup, CPF, setting, and plating costs.")
 
-    summary_data = {
-        "Total_Stone_Cost": grand_stone_total,
-        "Total_Metal_Cost": grand_metal_total,
-        "Approximate_Total_Unit_Cost": grand_total_unit_cost,
-    }
+    # Create a download button for both tables
+    if stone_rows or metal_rows:
+        import io
+        import xlsxwriter
 
-    if breakdown_rows:
-        # Create a clean DataFrame for download that doesn't include the dollar signs
-        download_df = pd.DataFrame(breakdown_rows)
-        download_df["Total Price (USD)"] = download_df["Total Price (USD)"].str.replace('$', '').str.replace(',', '').astype(float)
+        @st.cache_data
+        def create_xlsx_for_download(stone_df, metal_df):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                if not stone_df.empty:
+                    stone_df.to_excel(writer, sheet_name='Stone Summary', index=False)
+                if not metal_df.empty:
+                    metal_df.to_excel(writer, sheet_name='Metal Summary', index=False)
+            processed_data = output.getvalue()
+            return processed_data
+
+        download_stone_df = pd.DataFrame(stone_rows)
+        download_metal_df = pd.DataFrame(metal_rows)
+        
+        xlsx_data = create_xlsx_for_download(download_stone_df, download_metal_df)
         
         st.download_button(
-            "Download detailed breakdown (CSV)",
-            download_df.to_csv(index=False).encode("utf-8"),
-            "cost_breakdown.csv",
-            "text/csv",
-            key="dl_breakdown_csv"
+            label="Download All Summaries (Excel)",
+            data=xlsx_data,
+            file_name="jewelry_summary.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
