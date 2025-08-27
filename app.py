@@ -558,46 +558,72 @@ with tab_summary:
     
     st.subheader("Order Summary")
 
-    # Display Center Stone Details
+    # Prepare data for a single DataFrame
+    breakdown_rows = []
+    
+    # Add Center Stone
     if st.session_state.center_details and st.session_state.center_details["total_cost"] > 0:
-        st.markdown("#### Center Stone")
-        details = st.session_state.center_details
-        st.write(f"**Gemstone:** {details['gem']}  \n**Shape:** {details['shape']}  \n**Size:** {details['size']}  \n**Pieces:** {details['qty']}  \n**Cost:** ${details['total_cost']:,.2f}")
-        grand_stone_total += details['total_cost']
-        st.markdown("---")
+        d = st.session_state.center_details
+        breakdown_rows.append({
+            "Category": "Center Stone",
+            "Gemstone": d['gem'],
+            "Shape": d['shape'],
+            "Size": d['size'],
+            "Pieces": d['qty'],
+            "Unit Price (USD)": f"${d['unit_cost']:,.2f}",
+            "Total Price (USD)": f"${d['total_cost']:,.2f}"
+        })
+        grand_stone_total += d['total_cost']
 
-    # Display Side Stones Details
+    # Add Side Stones
     if st.session_state.side_lines:
-        st.markdown("#### Side Stones")
-        for i, details in enumerate(st.session_state.side_lines):
-            if details["total_cost"] > 0:
-                st.write(f"**Side Stone #{i+1}**")
-                st.write(f"**Gemstone:** {details['gem']}  \n**Shape:** {details['shape']}  \n**Size:** {details['size']}  \n**Pieces:** {details['qty']}  \n**Cost:** ${details['total_cost']:,.2f}")
-                grand_stone_total += details['total_cost']
-                if i < len(st.session_state.side_lines) - 1:
-                    st.markdown("---")
-        st.markdown("---")
+        for d in st.session_state.side_lines:
+            if d["total_cost"] > 0:
+                breakdown_rows.append({
+                    "Category": "Side Stone",
+                    "Gemstone": d['gem'],
+                    "Shape": d['shape'],
+                    "Size": d['size'],
+                    "Pieces": d['qty'],
+                    "Unit Price (USD)": f"${d['unit_cost']:,.2f}",
+                    "Total Price (USD)": f"${d['total_cost']:,.2f}"
+                })
+                grand_stone_total += d['total_cost']
 
-    # Display Accent Details
+    # Add Accents
     if st.session_state.acc_lines:
-        st.markdown("#### Accents")
-        for i, details in enumerate(st.session_state.acc_lines):
-            if details["total_cost"] > 0:
-                st.write(f"**Accent #{i+1}**")
-                st.write(f"**Gemstone:** {details['gem']}  \n**Shape:** {details['shape']}  \n**Size:** {details['size']}  \n**Pieces:** {details['qty']}  \n**Cost:** ${details['total_cost']:,.2f}")
-                grand_stone_total += details['total_cost']
-                if i < len(st.session_state.acc_lines) - 1:
-                    st.markdown("---")
-        st.markdown("---")
+        for d in st.session_state.acc_lines:
+            if d["total_cost"] > 0:
+                breakdown_rows.append({
+                    "Category": "Accent",
+                    "Gemstone": d['gem'],
+                    "Shape": d['shape'],
+                    "Size": d['size'],
+                    "Pieces": d['qty'],
+                    "Unit Price (USD)": f"${d['unit_cost']:,.2f}",
+                    "Total Price (USD)": f"${d['total_cost']:,.2f}"
+                })
+                grand_stone_total += d['total_cost']
 
-    # Display Metal Details
+    # Add Metal
     grand_metal_total = 0.0
     if st.session_state.metal_details and st.session_state.metal_details["Total Cost"] > 0:
-        st.markdown("#### Metal")
-        details = st.session_state.metal_details
-        st.write(f"**Product Type:** {details['Product Type']}  \n**Metal:** {details['Metal']}  \n**Purity:** {details['Purity']}  \n**Weight:** {details['Weight (grams)']}g  \n**Cost:** ${details['Total Cost']:,.2f}")
-        grand_metal_total = details['Total Cost']
-        st.markdown("---")
+        d = st.session_state.metal_details
+        breakdown_rows.append({
+            "Category": "Metal",
+            "Metal": d['Metal'],
+            "Purity": d['Purity'],
+            "Weight (grams)": d['Weight (grams)'],
+            "Unit Price (USD)": f"${d['Unit Cost ($/g)']:.2f}",
+            "Total Price (USD)": f"${d['Total Cost']:,.2f}"
+        })
+        grand_metal_total = d['Total Cost']
+
+    if breakdown_rows:
+        breakdown_df = pd.DataFrame(breakdown_rows)
+        st.dataframe(breakdown_df, use_container_width=True)
+    else:
+        st.info("No items have been selected yet. Please go to the other tabs to build your order.")
 
     grand_total_unit_cost = grand_stone_total + grand_metal_total
 
@@ -615,69 +641,15 @@ with tab_summary:
         "Approximate_Total_Unit_Cost": grand_total_unit_cost,
     }
 
-    # Add detailed breakdown to a DataFrame for download
-    breakdown_rows = []
-    if st.session_state.center_details and st.session_state.center_details["total_cost"] > 0:
-        d = st.session_state.center_details
-        breakdown_rows.append({
-            "Category": "Center Stone",
-            "Gemstone": d['gem'],
-            "Shape": d['shape'],
-            "Size": d['size'],
-            "Qty": d['qty'],
-            "Unit_Cost": d['unit_cost'],
-            "Total_Cost": d['total_cost']
-        })
-    if st.session_state.side_lines:
-        for d in st.session_state.side_lines:
-            if d["total_cost"] > 0:
-                breakdown_rows.append({
-                    "Category": "Side Stone",
-                    "Gemstone": d['gem'],
-                    "Shape": d['shape'],
-                    "Size": d['size'],
-                    "Qty": d['qty'],
-                    "Unit_Cost": d['unit_cost'],
-                    "Total_Cost": d['total_cost']
-                })
-    if st.session_state.acc_lines:
-        for d in st.session_state.acc_lines:
-            if d["total_cost"] > 0:
-                breakdown_rows.append({
-                    "Category": "Accent",
-                    "Gemstone": d['gem'],
-                    "Shape": d['shape'],
-                    "Size": d['size'],
-                    "Qty": d['qty'],
-                    "Unit_Cost": d['unit_cost'],
-                    "Total_Cost": d['total_cost']
-                })
-    if st.session_state.metal_details and st.session_state.metal_details["Total Cost"] > 0:
-        d = st.session_state.metal_details
-        breakdown_rows.append({
-            "Category": "Metal",
-            "Metal": d['Metal'],
-            "Purity": d['Purity'],
-            "Weight": d['Weight (grams)'],
-            "Unit_Cost_per_gram": d['Unit Cost ($/g)'],
-            "Total_Cost": d['Total Cost']
-        })
-
     if breakdown_rows:
-        breakdown_df = pd.DataFrame(breakdown_rows)
+        # Create a clean DataFrame for download that doesn't include the dollar signs
+        download_df = pd.DataFrame(breakdown_rows)
+        download_df["Total Price (USD)"] = download_df["Total Price (USD)"].str.replace('$', '').str.replace(',', '').astype(float)
+        
         st.download_button(
             "Download detailed breakdown (CSV)",
-            breakdown_df.to_csv(index=False).encode("utf-8"),
+            download_df.to_csv(index=False).encode("utf-8"),
             "cost_breakdown.csv",
             "text/csv",
             key="dl_breakdown_csv"
         )
-
-    summary_df = pd.DataFrame([summary_data])
-    st.download_button(
-        "Download summary (CSV)",
-        summary_df.to_csv(index=False).encode("utf-8"),
-        "total_cost_summary.csv",
-        "text/csv",
-        key="dl_summary_csv"
-    )
