@@ -4,70 +4,70 @@ import pandas as pd
 import numpy as np
 from math import isfinite
 
-# ---------- Page ----------
+# ---------------- Page & CSS ----------------
 st.set_page_config(page_title="Estimator Pro", layout="wide")
 st.markdown(
     """
     <style>
-      /* compact but readable */
       .block-container {padding-top: 1rem; padding-bottom: 2rem; max-width: 1400px;}
       .small-help {font-size: 0.85rem; color: #666;}
       div[data-testid="stMetricValue"] {font-variant-numeric: tabular-nums;}
-      /* snugger widgets */
-      .stSelectbox, .stNumberInput, .stTextArea, .stTextInput {margin-bottom: 0.25rem !important;}
-      label[data-testid="stWidgetLabel"] {font-size: 0.80rem; margin-bottom: 0.15rem;}
+      .stSelectbox, .stNumberInput, .stTextInput, .stTextArea {margin-bottom: 0.35rem !important;}
+      label[data-testid="stWidgetLabel"] {font-size: 0.85rem; margin-bottom: 0.15rem;}
       .pill {background:#f6f9ff;border:1px solid #e3ecff;border-radius:8px;padding:10px 12px;margin-top:.25rem;}
       .mono {font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;}
-      .tight {gap: .5rem;}
-      .note {font-size:.9rem;color:#666;}
       .caption-tight {margin-top:-6px;color:#7a7a7a;}
-      .hdr {font-weight:600;letter-spacing:.2px;color:#334;}
-      /* Table cell visibility improvements */
+      /* Prevent clipped cell text in dataframes */
       .stDataFrame td div { white-space: nowrap; overflow: visible; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("Estimator Pro - Metal & Stones BBJ Bangkok Ltd")
+st.title("Estimator Pro – Metal & Stones · BBJ Bangkok Ltd")
 st.caption(
-    "Build center/side/accent stone lines with **cascading filters** (Gem → Shape → Size → Cut → Color → Country → Treatment), "
-    "priced by **average per piece** or **per carat × weight** from your master sheet. Use the **Metal** tab for live per-gram rates. "
-    "Use the **Labor** tab to apply CPF, setting, and plating based on your JTV standard rates."
+    "Build center/side/accent stone lines with *cascading filters* (Gem → Shape → Size → Cut → Color → Country → Treatment), "
+    "priced by *average per piece* or *per carat × weight* from your master sheet. "
+    "Use the *Metal* tab for live per-gram rates and *Labor* to estimate CPF/setting/plating. "
+    "Finish in *Summary* and export."
 )
 
-# =========================================================
-#                     DATA LOADING
-# =========================================================
-@st.cache_data
-def load_master(xlsx_path="TEST.xlsx", sheet="MCGI_Master_Price"):
+# ---------------- Sidebar: data controls ----------------
+st.sidebar.header("Data Source")
+xlsx_path = st.sidebar.text_input("Excel file path or name", value="TEST.xlsx", help="Example: TEST.xlsx (must be in working directory)")
+sheet_name = st.sidebar.text_input("Sheet name", value="MCGI_Master_Price")
+reload_now = st.sidebar.button("Reload data")
+
+# ---------------- Data loading ----------------
+@st.cache_data(show_spinner=False)
+def load_master(xlsx_path:str, sheet:str):
     df = pd.read_excel(xlsx_path, sheet_name=sheet)
-    for c in [
-        "Gemstone", "Shape", "Size", "Cut",
-        "Color", "Country of Origin", "Stone Treatment",
-        "Unit Of Measure", "Price Per Piece US$", "Price Per Carat US$", "Average Weight Per Piece"
-    ]:
+    # normalize key columns
+    text_cols = [
+        "Gemstone","Shape","Size","Cut","Color","Country of Origin","Stone Treatment","Unit Of Measure"
+    ]
+    num_cols = ["Price Per Piece US$","Price Per Carat US$","Average Weight Per Piece"]
+    for c in text_cols:
         if c in df.columns:
-            if c in ("Price Per Piece US$", "Price Per Carat US$", "Average Weight Per Piece"):
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-            else:
-                df[c] = df[c].astype(str).str.strip()
+            df[c] = df[c].astype(str).str.strip()
+    for c in num_cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
     return df
 
+if reload_now:
+    load_master.clear()
+
 try:
-    df = load_master(sheet="MCGI_Master_Price")
+    df = load_master(xlsx_path, sheet_name)
 except Exception as e:
-    st.error(f"Failed to load Excel: {e}")
+    st.error(f"Failed to load Excel → {e}")
     st.stop()
 
-# =========================================================
-#                        HELPERS
-# =========================================================
+# ---------------- Helpers ----------------
 def parse_size(s):
-    if s is None:
-        return None
-    s = str(s).strip().lower().replace(" ", "")
-    s = s.replace("mm", "")
+    if s is None: return None
+    s = str(s).strip().lower().replace(" ", "").replace("mm", "")
     return s
 
 def uniq(series):
@@ -104,10 +104,8 @@ def cascade_options(df, gem=None, shape=None, size=None, cut=None):
 
 def avg_price_lookup(df, gem, shape, size, cut=None, color=None, country=None, treatment=None):
     q = df.copy()
-    if gem:
-        q = q[q["Gemstone"].str.lower() == str(gem).strip().lower()]
-    if shape:
-        q = q[q["Shape"].str.lower() == str(shape).strip().lower()]
+    if gem:    q = q[q["Gemstone"].str.lower() == str(gem).strip().lower()]
+    if shape:  q = q[q["Shape"].str.lower() == str(shape).strip().lower()]
     if size:
         key = parse_size(size)
         q = q[q["Size"].map(parse_size) == key]
@@ -147,37 +145,6 @@ def avg_price_lookup(df, gem, shape, size, cut=None, color=None, country=None, t
 
     return unit_cost, note, (avg_row or None), len(q), q
 
-def parse_max_mm(size_str):
-    """
-    Tries to extract the *largest* mm dimension from 'Size' text.
-    Examples:
-      "8x6" -> 8
-      "7x5mm" -> 7
-      "2.75mm" -> 2.75
-      "3 mm" -> 3
-    Returns float or None.
-    """
-    if not size_str:
-        return None
-    s = str(size_str).lower().replace(" ", "").replace("mm", "")
-    if "x" in s:
-        parts = s.split("x")
-        nums = []
-        for p in parts:
-            try:
-                nums.append(float(p))
-            except:
-                pass
-        return max(nums) if nums else None
-    else:
-        try:
-            return float(s)
-        except:
-            return None
-
-# =========================================================
-#                      LINE ITEM UI
-# =========================================================
 def line_item(df, header, key_prefix):
     st.markdown(f"#### {header}")
 
@@ -185,33 +152,33 @@ def line_item(df, header, key_prefix):
     c1, c2, c3 = st.columns([1.1, 1.0, 1.2], gap="small")
     with c1:
         gems = [""] + uniq(df["Gemstone"])
-        gem = st.selectbox("Gemstone", gems, index=0, key=f"{key_prefix}_gem", help="Gemstone")
+        gem = st.selectbox("Gemstone", gems, index=0, key=f"{key_prefix}_gem", help="Pick a gemstone")
     shapes, _, _, _, _, _ = cascade_options(df, gem=gem or None)
     with c2:
-        shape = st.selectbox("Shape", [""] + shapes, index=0, key=f"{key_prefix}_shape", help="Shape")
+        shape = st.selectbox("Shape", [""] + shapes, index=0, key=f"{key_prefix}_shape", help="Pick a shape")
     _, sizes, _, _, _, _ = cascade_options(df, gem=gem or None, shape=shape or None)
     with c3:
-        size = st.selectbox("Size", [""] + sizes, index=0, key=f"{key_prefix}_size", help="Size")
+        size = st.selectbox("Size", [""] + sizes, index=0, key=f"{key_prefix}_size", help="Pick a size")
 
     # Row 2: Cut, Color, Country, Treatment, Qty
-    d1, d2, d3, d4, d5 = st.columns([1.2, 1.0, 1.2, 1.2, 0.7], gap="small")
+    d1, d2, d3, d4, d5 = st.columns([1.2, 1.0, 1.2, 1.2, 0.8], gap="small")
     _, _, cuts, colors, countries, treatments = cascade_options(
         df, gem=gem or None, shape=shape or None, size=size or None
     )
     with d1:
-        cut = st.selectbox("Cut", [""] + cuts, index=0, key=f"{key_prefix}_cut", help="Cut")
+        cut = st.selectbox("Cut", [""] + cuts, index=0, key=f"{key_prefix}_cut", help="Optional")
     with d2:
-        color = st.selectbox("Color (optional)", ["(any)"] + colors, index=0, key=f"{key_prefix}_color", help="Color (optional)")
+        color = st.selectbox("Color (optional)", ["(any)"] + colors, index=0, key=f"{key_prefix}_color")
     with d3:
-        country = st.selectbox("Country (optional)", ["(any)"] + countries, index=0, key=f"{key_prefix}_country", help="Country of Origin (optional)")
+        country = st.selectbox("Country (optional)", ["(any)"] + countries, index=0, key=f"{key_prefix}_country")
     with d4:
-        treatment = st.selectbox("Treatment (optional)", ["(any)"] + treatments, index=0, key=f"{key_prefix}_treat", help="Stone Treatment (optional)")
+        treatment = st.selectbox("Treatment (optional)", ["(any)"] + treatments, index=0, key=f"{key_prefix}_treat")
     with d5:
-        qty = st.number_input("Pieces", min_value=0, value=1, step=1, key=f"{key_prefix}_qty", help="Pieces")
+        qty = st.number_input("Pieces", min_value=0, value=1, step=1, key=f"{key_prefix}_qty")
 
-    use_color = None if color == "(any)" else color
-    use_country = None if country == "(any)" else country
-    use_treat = None if treatment == "(any)" else treatment
+    use_color    = None if color == "(any)" else color
+    use_country  = None if country == "(any)" else country
+    use_treat    = None if treatment == "(any)" else treatment
 
     item_details = {
         "gem": gem or "",
@@ -224,9 +191,7 @@ def line_item(df, header, key_prefix):
         "qty": qty,
         "unit_cost": 0.0,
         "total_cost": 0.0,
-        "note": "",
-        # for labor auto size parsing:
-        "max_mm": parse_max_mm(size or "")
+        "note": ""
     }
 
     if qty > 0 and gem and shape and size:
@@ -235,23 +200,21 @@ def line_item(df, header, key_prefix):
         )
         if cost is not None:
             total = cost * qty
-            item_details["unit_cost"] = cost
-            item_details["total_cost"] = total
-            item_details["note"] = note
+            item_details.update({"unit_cost": cost, "total_cost": total, "note": note})
             line1 = (
-                f"Price Per Piece: US${cost:,.4f} (Currency) · "
+                f"Price Per Piece: US${cost:,.4f} · "
                 f"Total Pieces: {qty} · "
-                f"**Total Price: US${total:,.4f} (Currency)** "
+                f"*Total: US${total:,.4f}* "
                 f"({note})"
             )
             bits = []
             if avg_row:
                 if "Average Price Per Piece US$" in avg_row:
-                    bits.append(f"Avg Price per Piece: US${avg_row['Average Price Per Piece US$']:.4f} (Currency)")
+                    bits.append(f"Avg Price/pc: US${avg_row['Average Price Per Piece US$']:.4f}")
                 if "Average Price Per Carat US$" in avg_row:
-                    bits.append(f"Avg Price Carat: US${avg_row['Average Price Per Carat US$']:.4f} (Currency)")
+                    bits.append(f"Avg Price/ct: US${avg_row['Average Price Per Carat US$']:.4f}")
                 if "Average Weight Per Piece" in avg_row:
-                    bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f} Carats")
+                    bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f} ct")
             line2 = " · ".join(bits)
             st.success(line1 + ("" if not line2 else "  \n" + line2))
             st.caption(f"Matched rows: {nmatch}")
@@ -265,67 +228,64 @@ def line_item(df, header, key_prefix):
                     st.dataframe(preview.head(50), use_container_width=True, hide_index=True)
             return 0.0, None
     else:
-        st.info("Pick Gemstone → Shape → Size (optional Cut/Color/Country/Treatment) and set Qty.")
+        st.info("Pick Gemstone → Shape → Size (then optional Cut/Color/Country/Treatment) and set Pieces.")
         return 0.0, None
 
-# =========================================================
-#                     TABS LAYOUT
-# =========================================================
+# ---------------- TABS ----------------
 tab_center, tab_side, tab_acc, tab_metal, tab_labor, tab_summary = st.tabs(
     ["Center", "Side", "Accents", "Metal", "Labor", "Summary"]
 )
 
-# State initializers
+# Session state buckets
 if 'center_details' not in st.session_state: st.session_state.center_details = None
 if 'side_lines' not in st.session_state: st.session_state.side_lines = []
-if 'acc_lines' not in st.session_state: st.session_state.acc_lines = []
+if 'acc_lines' not in st.session_state:  st.session_state.acc_lines = []
 if 'metal_details' not in st.session_state: st.session_state.metal_details = None
+if 'labor_totals' not in st.session_state:  st.session_state.labor_totals = {}
 
-# ----------------- CENTER
+# -------- Center --------
 with tab_center:
-    left, right = st.columns([1.0, 1.0])
+    left, right = st.columns([1.05, 0.95], gap="large")
     with left:
         center_total, center_meta = line_item(df, "Center Stone", key_prefix="center")
         st.session_state.center_details = center_meta
     with right:
-        st.markdown("**Notes (optional, internal)**")
+        st.markdown("*Notes (optional, internal)*")
         st.text_area(
-            "Notes (center)",
+            "Center Notes",
             value="",
             key="notes_center",
             placeholder="Any memo about this center stone…",
             height=96,
         )
 
-# ----------------- SIDE
+# -------- Side --------
 with tab_side:
     st.subheader("Side Stones")
-    side_count = st.number_input("How many side stone lines?", min_value=0, max_value=10, value=2, step=1, key="side_lines_count")
+    side_count = st.number_input("Number of side stone lines", min_value=0, max_value=10, value=2, step=1, key="side_lines_count")
     side_tot = 0.0
     st.session_state.side_lines = []
     for i in range(int(side_count)):
         tot, meta = line_item(df, f"Side #{i+1}", key_prefix=f"side_{i+1}")
         side_tot += tot
-        if meta:
-            st.session_state.side_lines.append(meta)
+        if meta: st.session_state.side_lines.append(meta)
 
-# ----------------- ACCENTS
+# -------- Accents --------
 with tab_acc:
     st.subheader("Accents")
-    acc_count = st.number_input("How many accent lines?", min_value=0, max_value=20, value=1, step=1, key="acc_lines_count")
+    acc_count = st.number_input("Number of accent lines", min_value=0, max_value=20, value=1, step=1, key="acc_lines_count")
     acc_tot = 0.0
     st.session_state.acc_lines = []
     for i in range(int(acc_count)):
         tot, meta = line_item(df, f"Accent #{i+1}", key_prefix=f"acc_{i+1}")
         acc_tot += tot
-        if meta:
-            st.session_state.acc_lines.append(meta)
+        if meta: st.session_state.acc_lines.append(meta)
 
-# =========================================================
-#                METAL CALCULATOR (as-is)
-# =========================================================
+# -------- Metal Calculator --------
 with tab_metal:
     st.subheader("Metal Calculator")
+
+    # Optional live prices in the sidebar
     with st.sidebar:
         st.markdown("---")
         st.markdown("### Live metal prices (optional)")
@@ -338,11 +298,13 @@ with tab_metal:
                 tickers = {"Gold": "GC=F", "Silver": "SI=F", "Copper": "HG=F"}
                 for m, tkr in tickers.items():
                     t = yf.Ticker(tkr)
-                    info = getattr(t, "fast_info", None)
                     px = None
+                    # Try fast_info.last_price first
+                    info = getattr(t, "fast_info", None)
                     if info is not None and hasattr(info, "last_price"):
                         px = float(info.last_price)
-                    else:
+                    # Fallback to last close
+                    if px is None:
                         hist = t.history(period="1d")
                         if not hist.empty and "Close" in hist.columns:
                             px = float(hist["Close"].iloc[-1])
@@ -350,161 +312,159 @@ with tab_metal:
                         ounce_prices[m] = px
                 live_note.success("Live ounce prices fetched ✅")
             except Exception as e:
-                live_note.warning(f"Could not fetch live prices: {e}. You can enter ounce prices manually below.")
+                live_note.warning(f"Could not fetch live prices: {e}. Enter ounce prices manually in Metal tab.")
 
     colA, colB = st.columns([1.2, 1.0])
     with colA:
         st.markdown("#### Inputs")
-        prod = st.selectbox("Product Type", ["Ring", "Earring", "Pendant", "Necklace", "Bracelet", "Bangle"], key="m_prod")
-        metal = st.selectbox("Metal", ["Gold", "Silver", "Copper", "Steel", "Brass"], key="m_metal")
+        prod = st.selectbox("Product Type", ["Ring","Earring","Pendant","Necklace","Bracelet","Bangle"], key="m_prod")
+        metal = st.selectbox("Metal", ["Gold","Silver","Copper","Steel","Brass"], key="m_metal")
 
-        purity_options = []
         if metal == "Gold":
-            purity_options = ["18K", "14K", "10K", "9K"]
+            purity_options = ["18K","14K","10K","9K"]
         elif metal == "Silver":
             purity_options = ["SS925"]
         else:
             purity_options = ["N.A"]
-        purity_choice = st.selectbox("Metal Purity", purity_options, key="m_purity")
-        if purity_choice == "N.A":
-            st.caption("Purity is not applicable for this metal.")
 
-        plating = st.selectbox(
-            "Plating",
-            ["(None)", "14KY Gold Plating over Silver", "18KY Gold Plating over Silver", "Rhodium Plating"],
-            key="m_plating",
-        )
+        purity_choice = st.selectbox("Metal Purity", purity_options, key="m_purity")
+        plating = st.selectbox("Plating", ["(None)","14KY Gold Plating over Silver","18KY Gold Plating over Silver"], key="m_plating")
 
         approx_weight = st.number_input("Approximate Metal Weight (grams)", min_value=0.0, value=0.0, step=0.1, key="approx_weight")
 
-        st.markdown("**Ounce Prices (USD/oz)**")
-        st.number_input("Gold (USD/oz)", min_value=0.0, step=1.0,
-                        value=float(ounce_prices["Gold"]) if ounce_prices["Gold"] else 0.0,
-                        key="oz_gold", disabled=(metal != "Gold"))
-        st.number_input("Silver (USD/oz)", min_value=0.0, step=0.1,
-                        value=float(ounce_prices["Silver"]) if ounce_prices["Silver"] else 0.0,
-                        key="oz_silver", disabled=(metal != "Silver"))
-        st.number_input("Copper (USD/oz)", min_value=0.0, step=0.01,
-                        value=float(ounce_prices["Copper"]) if ounce_prices["Copper"] else 0.0,
-                        key="oz_copper", disabled=(metal not in ["Brass", "Copper", "Steel"]))
+        st.markdown("*Ounce Prices (USD/oz)*")
+        st.number_input("Gold (USD/oz)",   min_value=0.0, step=1.0,  value=float(ounce_prices["Gold"])   if ounce_prices["Gold"]   else 0.0, key="oz_gold")
+        st.number_input("Silver (USD/oz)", min_value=0.0, step=0.1,  value=float(ounce_prices["Silver"]) if ounce_prices["Silver"] else 0.0, key="oz_silver")
+        st.number_input("Copper (USD/oz)", min_value=0.0, step=0.01, value=float(ounce_prices["Copper"]) if ounce_prices["Copper"] else 0.0, key="oz_copper")
 
-        st.markdown("**Factors (you can adjust)**")
-        st.number_input("Ounce → gram factor", value=32.148, step=0.001, key="conv_oz_to_g", disabled=False)
-        st.number_input("Silver yield factor", value=0.95, step=0.01, key="silver_yield", disabled=(metal != "Silver"))
-        st.number_input("Silver finishing factor", value=1.15, step=0.01, key="silver_finish", disabled=(metal != "Silver"))
-        st.number_input("Gold finishing factor", value=1.12, step=0.01, key="gold_finish", disabled=(metal != "Gold"))
+        st.markdown("*Factors (editable)*")
+        st.number_input("Ounce → gram factor", value=32.148, step=0.001, key="conv_oz_to_g")
+        st.number_input("Silver yield factor", value=0.95, step=0.01, key="silver_yield")
+        st.number_input("Silver finishing factor", value=1.15, step=0.01, key="silver_finish")
+        st.number_input("Gold finishing factor", value=1.12, step=0.01, key="gold_finish")
 
-        st.markdown("_Gold purities (fraction)_")
-        st.number_input("9K purity", value=0.375, step=0.001, key="p9", disabled=(metal != "Gold"))
-        st.number_input("10K purity", value=0.417, step=0.001, key="p10", disabled=(metal != "Gold"))
-        st.number_input("14K purity", value=0.59, step=0.001, key="p14", disabled=(metal != "Gold"))
-        st.number_input("18K purity", value=0.750, step=0.001, key="p18", disabled=(metal != "Gold"))
+        st.markdown("Gold purities (fraction)")
+        st.number_input("9K purity fraction",  value=0.375, step=0.001, key="p9")
+        st.number_input("10K purity fraction", value=0.417, step=0.001, key="p10")
+        st.number_input("14K purity fraction", value=0.59,  step=0.001, key="p14")
+        st.number_input("18K purity fraction", value=0.750, step=0.001, key="p18")
 
-        st.markdown("_Other baselines_")
-        st.number_input("Silver purity (SS925)", value=0.925, step=0.001, key="pss", disabled=(metal != "Silver"))
-        st.checkbox("Derive Brass price from Copper (0.7 × Copper/gram)", value=True, key="brass_from_cu", disabled=(metal != "Brass"))
-        st.checkbox("Derive Steel price from Copper (0.5 × Copper/gram)", value=True, key="steel_from_cu", disabled=(metal != "Steel"))
+        st.markdown("Other baselines")
+        st.number_input("Silver purity (SS925 fraction)", value=0.925, step=0.001, key="pss")
+        st.checkbox("Derive Brass price from Copper (0.7 × Copper/gram)", value=True, key="brass_from_cu")
+        st.checkbox("Derive Steel price from Copper (0.5 × Copper/gram)", value=True, key="steel_from_cu")
 
     with colB:
         st.markdown("#### Results")
-        densities = {
-            "18K": 15.5, "14K": 13.5, "10K": 11.5, "9K": 10.5, "SS925": 10.4,
-            "Brass": 8.73, "Copper": 8.96
-        }
+        densities = { "18K": 15.5, "14K": 13.5, "10K": 11.5, "9K": 10.5, "SS925": 10.4, "Brass": 8.73, "Copper": 8.96 }
+
         def per_gram_silver(oz_price, conv_oz_to_g, silver_yield, silver_finish):
             if oz_price <= 0: return None
             return (oz_price * conv_oz_to_g * silver_yield * silver_finish) / 1000.0
+
         def per_gram_gold(oz_price, conv_oz_to_g, purity, gold_finish):
             if oz_price <= 0: return None
             return (oz_price * conv_oz_to_g * purity * gold_finish) / 1000.0
+
         def per_gram_copper(oz_price, conv_oz_to_g):
             if oz_price <= 0: return None
             return (oz_price * conv_oz_to_g) / 1000.0
 
-        oz_gold = st.session_state.get('oz_gold', 0.0)
+        oz_gold   = st.session_state.get('oz_gold', 0.0)
         oz_silver = st.session_state.get('oz_silver', 0.0)
         oz_copper = st.session_state.get('oz_copper', 0.0)
-        conv_oz_to_g = st.session_state.get('conv_oz_to_g', 32.148)
-        silver_yield = st.session_state.get('silver_yield', 0.95)
-        silver_finish = st.session_state.get('silver_finish', 1.15)
-        gold_finish = st.session_state.get('gold_finish', 1.12)
-        gold_p_9k = st.session_state.get('p9', 0.375)
-        gold_p_10k = st.session_state.get('p10', 0.417)
-        gold_p_14k = st.session_state.get('p14', 0.59)
-        gold_p_18k = st.session_state.get('p18', 0.750)
+        conv      = st.session_state.get('conv_oz_to_g', 32.148)
+        sy        = st.session_state.get('silver_yield', 0.95)
+        sf        = st.session_state.get('silver_finish', 1.15)
+        gf        = st.session_state.get('gold_finish', 1.12)
+        p9        = st.session_state.get('p9', 0.375)
+        p10       = st.session_state.get('p10', 0.417)
+        p14       = st.session_state.get('p14', 0.59)
+        p18       = st.session_state.get('p18', 0.750)
 
-        silver_g = per_gram_silver(oz_silver, conv_oz_to_g, silver_yield, silver_finish) if oz_silver else None
-        gold_g_9 = per_gram_gold(oz_gold, conv_oz_to_g, gold_p_9k, gold_finish) if oz_gold else None
-        gold_g_10 = per_gram_gold(oz_gold, conv_oz_to_g, gold_p_10k, gold_finish) if oz_gold else None
-        gold_g_14 = per_gram_gold(oz_gold, conv_oz_to_g, gold_p_14k, gold_finish) if oz_gold else None
-        gold_g_18 = per_gram_gold(oz_gold, conv_oz_to_g, gold_p_18k, gold_finish) if oz_gold else None
-        copper_g = per_gram_copper(oz_copper, conv_oz_to_g) if oz_copper else None
+        silver_g = per_gram_silver(oz_silver, conv, sy, sf) if oz_silver else None
+        gold_g_9  = per_gram_gold(oz_gold, conv, p9,  gf) if oz_gold else None
+        gold_g_10 = per_gram_gold(oz_gold, conv, p10, gf) if oz_gold else None
+        gold_g_14 = per_gram_gold(oz_gold, conv, p14, gf) if oz_gold else None
+        gold_g_18 = per_gram_gold(oz_gold, conv, p18, gf) if oz_gold else None
+        copper_g  = per_gram_copper(oz_copper, conv) if oz_copper else None
 
-        brass_from_copper = st.session_state.get("brass_from_cu", True)
-        steel_from_copper = st.session_state.get("steel_from_cu", True)
-        brass_g = 0.70 * copper_g if (brass_from_copper and copper_g) else None
-        steel_g = 0.50 * copper_g if (steel_from_copper and copper_g) else None
+        brass_g = (0.70 * copper_g) if st.session_state.get("brass_from_cu", True) and copper_g else None
+        steel_g = (0.50 * copper_g) if st.session_state.get("steel_from_cu", True)  and copper_g else None
+        if brass_g is None:
+            brass_g = 0.0
+        if steel_g is None:
+            steel_g = 0.0
 
         rows = [
             {"Metal": "Silver 925", "USD/gram": None if silver_g is None else round(silver_g, 4)},
-            {"Metal": "Gold 9K", "USD/gram": None if gold_g_9 is None else round(gold_g_9, 4)},
-            {"Metal": "Gold 10K", "USD/gram": None if gold_g_10 is None else round(gold_g_10, 4)},
-            {"Metal": "Gold 14K", "USD/gram": None if gold_g_14 is None else round(gold_g_14, 4)},
-            {"Metal": "Gold 18K", "USD/gram": None if gold_g_18 is None else round(gold_g_18, 4)},
-            {"Metal": "Copper", "USD/gram": None if copper_g is None else round(copper_g, 4)},
-            {"Metal": "Brass", "USD/gram": None if brass_g is None else round(brass_g, 4)},
-            {"Metal": "Steel", "USD/gram": None if steel_g is None else round(steel_g, 4)},
+            {"Metal": "Gold 9K",   "USD/gram": None if gold_g_9  is None else round(gold_g_9, 4)},
+            {"Metal": "Gold 10K",  "USD/gram": None if gold_g_10 is None else round(gold_g_10, 4)},
+            {"Metal": "Gold 14K",  "USD/gram": None if gold_g_14 is None else round(gold_g_14, 4)},
+            {"Metal": "Gold 18K",  "USD/gram": None if gold_g_18 is None else round(gold_g_18, 4)},
+            {"Metal": "Copper",    "USD/gram": None if copper_g  is None else round(copper_g, 4)},
+            {"Metal": "Brass",     "USD/gram": round(brass_g, 4)},
+            {"Metal": "Steel",     "USD/gram": round(steel_g, 4)},
         ]
         metal_df = pd.DataFrame(rows)
         st.dataframe(metal_df, use_container_width=True, hide_index=True)
 
-        st.caption(
-            "Formulas: Silver = (oz × 32.148 × yield × finishing) / 1000 ; "
-            "Gold = (oz × 32.148 × purity × finishing) / 1000 — defaults match your examples."
-        )
+        st.caption("Formulas: Silver = (oz × 32.148 × yield × finishing)/1000; Gold = (oz × 32.148 × purity × finishing)/1000. Defaults match your examples.")
 
+        # Compute final metal cost if weight + chosen metal/purity available
         final_metal_cost = 0.0
         metal_details = {}
-        if approx_weight > 0 and metal and purity_choice:
-            current_metal_gram_cost = None
+        selected_unit_cost = None
+        if approx_weight > 0:
             if metal == "Gold":
-                current_metal_gram_cost = {"18K": gold_g_18, "14K": gold_g_14, "10K": gold_g_10, "9K": gold_g_9}.get(purity_choice)
-            elif metal == "Silver": current_metal_gram_cost = silver_g
-            elif metal == "Brass": current_metal_gram_cost = brass_g
-            elif metal == "Copper": current_metal_gram_cost = copper_g
-            elif metal == "Steel": current_metal_gram_cost = steel_g
+                if purity_choice == "18K": selected_unit_cost = gold_g_18
+                elif purity_choice == "14K": selected_unit_cost = gold_g_14
+                elif purity_choice == "10K": selected_unit_cost = gold_g_10
+                elif purity_choice == "9K":  selected_unit_cost = gold_g_9
+            elif metal == "Silver":
+                selected_unit_cost = silver_g
+            elif metal == "Brass":
+                selected_unit_cost = brass_g
+            elif metal == "Copper":
+                selected_unit_cost = copper_g
+            elif metal == "Steel":
+                selected_unit_cost = steel_g
 
-            if current_metal_gram_cost is not None:
-                final_metal_cost = approx_weight * current_metal_gram_cost
-                st.metric(f"Approximate Metal Cost ({metal}, {purity_choice})", f"US${final_metal_cost:,.2f}")
+            if selected_unit_cost is not None and selected_unit_cost > 0:
+                final_metal_cost = approx_weight * selected_unit_cost
+                st.metric(f"Approx. Metal Cost ({metal} {purity_choice})", f"US${final_metal_cost:,.2f}")
                 metal_details = {
-                    "Product Type": prod, "Metal": metal, "Purity": purity_choice,
-                    "Plating": st.session_state.get("m_plating", "(None)"),
+                    "Product Type": prod,
+                    "Metal": metal,
+                    "Purity": purity_choice,
+                    "Plating": plating,
                     "Weight (grams)": approx_weight,
-                    "Unit Cost ($/g)": current_metal_gram_cost,
+                    "Unit Cost ($/g)": selected_unit_cost,
                     "Total Cost": final_metal_cost,
                 }
             else:
-                st.warning("Please provide a valid ounce price to calculate the metal cost.")
+                st.warning("Enter valid ounce price(s) to calculate the per-gram cost for the selected metal/purity.")
+
         st.session_state.metal_details = metal_details
 
         st.markdown("---")
-        st.markdown("#### Relative Metal Weights")
-        densities = {
-            "18K": 15.5, "14K": 13.5, "10K": 11.5, "9K": 10.5, "SS925": 10.4,
-            "Brass": 8.73, "Copper": 8.96
-        }
-        if approx_weight > 0 and metal and purity_choice:
-            base_key = purity_choice if metal in ["Gold", "Silver"] else metal
+        st.markdown("#### Relative Metal Weights (same volume)")
+        if approx_weight > 0:
+            # choose base density key
+            base_key = purity_choice if metal in ["Gold","Silver"] else metal
             base_density = densities.get(base_key)
-            if base_density is not None:
+            if base_density:
                 volume = approx_weight / base_density
-                weight_rows = [{"Metal": m, "Approx. Weight (grams)": round(volume * d, 2)} for m, d in densities.items()]
-                st.dataframe(pd.DataFrame(weight_rows), use_container_width=True)
+                weight_rows = []
+                for m, density in densities.items():
+                    relative_weight = volume * density
+                    weight_rows.append({"Metal": m, "Approx. Weight (grams)": round(relative_weight, 2)})
+                weight_df = pd.DataFrame(weight_rows)
+                st.dataframe(weight_df, use_container_width=True, hide_index=True)
             else:
-                st.warning("Could not find density for selected base metal to calculate relative weights.")
+                st.info("Select a metal/purity that has a known density to see relative weights.")
         else:
-            st.info("Enter an approximate weight to see relative weights in other metals.")
+            st.info("Enter approximate weight to see relative weights in other metals.")
 
         st.download_button(
             "Download metal prices (CSV)",
@@ -514,10 +474,211 @@ with tab_metal:
             key="dl_metal_csv"
         )
 
-# =========================================================
-#                       LABOR TAB
-# =========================================================
+# -------- Labor (CPF / Setting / Plating) --------
 with tab_labor:
     st.subheader("Labor (CPF, Setting & Plating)")
+    st.caption("Rates sourced from Standard Labor for JTV – Aug. 2025.")
 
-    st.caption("Rates sourced from **Standard Labor for JTV – Aug. 2025**.
+    # derive counts from selections
+    center_qty = (st.session_state.center_details or {}).get("qty", 0) or 0
+    side_qty   = sum((d.get("qty",0) for d in st.session_state.side_lines), 0)
+    acc_qty    = sum((d.get("qty",0) for d in st.session_state.acc_lines), 0)
+
+    colL, colR = st.columns([1.2, 1.0], gap="large")
+
+    with colL:
+        st.markdown("#### Inputs")
+        labor_prod = st.selectbox("Product Type for Labor", ["Ring","Earring","Pendant","Necklace","Bracelet","Bangle"], key="lab_prod")
+
+        st.markdown("*CPF (Casting / Polish / Finish)*")
+        cpf_base = st.number_input("CPF base (USD per unit)", min_value=0.0, value=0.0, step=0.5, key="cpf_base")
+        cpf_weight_factor = st.number_input("CPF weight adder (USD per gram)", min_value=0.0, value=0.0, step=0.1, key="cpf_wt")
+
+        st.markdown("*Setting Costs*")
+        set_center = st.number_input("Setting per Center (USD/stone)", min_value=0.0, value=0.0, step=0.5, key="set_center")
+        set_side   = st.number_input("Setting per Side (USD/stone)",   min_value=0.0, value=0.0, step=0.25, key="set_side")
+        set_acc    = st.number_input("Setting per Accent (USD/stone)", min_value=0.0, value=0.0, step=0.10, key="set_acc")
+
+        st.markdown("*Plating / Misc*")
+        plating_flat = st.number_input("Plating flat (USD/unit)", min_value=0.0, value=0.0, step=0.5, key="plating_flat")
+        misc_labor   = st.number_input("Misc. labor (USD/unit)", min_value=0.0, value=0.0, step=0.5, key="misc_labor")
+
+        approx_weight_for_labor = st.number_input(
+            "Approximate metal weight for labor calc (grams)", min_value=0.0, value=st.session_state.get("approx_weight", 0.0), step=0.1, key="labor_weight"
+        )
+
+    with colR:
+        st.markdown("#### Derived Counts")
+        st.write(f"Center stones: *{center_qty}*")
+        st.write(f"Side stones: *{side_qty}*")
+        st.write(f"Accents: *{acc_qty}*")
+
+        cpf_total = cpf_base + (cpf_weight_factor * approx_weight_for_labor)
+        set_total = (center_qty * set_center) + (side_qty * set_side) + (acc_qty * set_acc)
+        labor_total = cpf_total + set_total + plating_flat + misc_labor
+
+        st.metric("CPF Total", f"US${cpf_total:,.2f}")
+        st.metric("Setting Total", f"US${set_total:,.2f}")
+        st.metric("Plating + Misc", f"US${(plating_flat + misc_labor):,.2f}")
+        st.metric("Labor Total", f"US${labor_total:,.2f}")
+
+        st.session_state.labor_totals = {
+            "Product": labor_prod,
+            "CPF Total": cpf_total,
+            "Setting Total": set_total,
+            "Plating + Misc": plating_flat + misc_labor,
+            "Labor Total": labor_total
+        }
+
+# -------- Summary --------
+with tab_summary:
+    st.subheader("Order Summary")
+
+    # Stone rows
+    stone_rows = []
+    grand_stone_total = 0.0
+    if st.session_state.center_details and st.session_state.center_details["total_cost"] > 0:
+        d = st.session_state.center_details
+        stone_rows.append({
+            "Category": "Center",
+            "Stone": d['gem'],
+            "Cut": d['cut'],
+            "Shape": d['shape'],
+            "Size": d['size'],
+            "Color": d['color'],
+            "Origin": d['country'],
+            "Treatment": d['treatment'],
+            "Pieces": d['qty'],
+            "Unit Price ($)": d['unit_cost'],
+            "Total Stone ($)": d['total_cost'],
+        })
+        grand_stone_total += d['total_cost']
+
+    for d in st.session_state.side_lines:
+        if d["total_cost"] > 0:
+            stone_rows.append({
+                "Category": "Side",
+                "Stone": d['gem'],
+                "Cut": d['cut'],
+                "Shape": d['shape'],
+                "Size": d['size'],
+                "Color": d['color'],
+                "Origin": d['country'],
+                "Treatment": d['treatment'],
+                "Pieces": d['qty'],
+                "Unit Price ($)": d['unit_cost'],
+                "Total Stone ($)": d['total_cost'],
+            })
+            grand_stone_total += d['total_cost']
+
+    for d in st.session_state.acc_lines:
+        if d["total_cost"] > 0:
+            stone_rows.append({
+                "Category": "Accent",
+                "Stone": d['gem'],
+                "Cut": d['cut'],
+                "Shape": d['shape'],
+                "Size": d['size'],
+                "Color": d['color'],
+                "Origin": d['country'],
+                "Treatment": d['treatment'],
+                "Pieces": d['qty'],
+                "Unit Price ($)": d['unit_cost'],
+                "Total Stone ($)": d['total_cost'],
+            })
+            grand_stone_total += d['total_cost']
+
+    if stone_rows:
+        stone_df = pd.DataFrame(stone_rows)
+        st.markdown("### Stone Summary")
+        st.dataframe(stone_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No stones have been selected yet.")
+
+    st.markdown("---")
+
+    # Metal summary
+    metal_rows = []
+    grand_metal_total = 0.0
+    if st.session_state.metal_details and st.session_state.metal_details.get("Total Cost", 0) > 0:
+        d = st.session_state.metal_details
+        metal_rows.append({
+            "Category": "Metal",
+            "Product": d['Product Type'],
+            "Metal": d['Metal'],
+            "Purity": d['Purity'],
+            "Plating": d['Plating'],
+            "Weight (g)": d['Weight (grams)'],
+            "Unit Price ($/g)": d['Unit Cost ($/g)'],
+            "Total Metal ($)": d['Total Cost'],
+        })
+        grand_metal_total += d['Total Cost']
+
+    if metal_rows:
+        metal_df = pd.DataFrame(metal_rows)
+        st.markdown("### Metal Summary")
+        st.dataframe(metal_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No metal has been calculated yet.")
+
+    st.markdown("---")
+
+    # Labor summary
+    labor_rows = []
+    grand_labor_total = 0.0
+    if st.session_state.labor_totals and st.session_state.labor_totals.get("Labor Total", 0) >= 0:
+        lt = st.session_state.labor_totals
+        labor_rows.append({
+            "Category": "Labor",
+            "Product": lt.get("Product",""),
+            "CPF Total": lt.get("CPF Total",0.0),
+            "Setting Total": lt.get("Setting Total",0.0),
+            "Plating + Misc": lt.get("Plating + Misc",0.0),
+            "Labor Total": lt.get("Labor Total",0.0)
+        })
+        grand_labor_total = lt.get("Labor Total",0.0)
+
+    if labor_rows:
+        labor_df = pd.DataFrame(labor_rows)
+        st.markdown("### Labor Summary")
+        st.dataframe(labor_df, use_container_width=True, hide_index=True)
+        st.caption("Labor rates per JTV sheet.")
+    else:
+        st.info("No labor has been entered yet.")
+
+    st.markdown("---")
+
+    # Totals
+    grand_total_unit_cost = grand_stone_total + grand_metal_total + grand_labor_total
+    k1,k2,k3,k4 = st.columns(4)
+    k1.metric("Total Stone Cost", f"${grand_stone_total:,.2f}")
+    k2.metric("Total Metal Cost", f"${grand_metal_total:,.2f}")
+    k3.metric("Total Labor Cost", f"${grand_labor_total:,.2f}")
+    k4.metric("Approx. Total Unit Cost", f"${grand_total_unit_cost:,.2f}")
+
+    st.markdown("---")
+    st.info("Disclaimer: These are approximate base costs without selling markup and exclude taxes, freight, and other commercial terms.")
+
+    # Downloads (Excel)
+    if stone_rows or metal_rows or labor_rows:
+        import io
+        @st.cache_data
+        def create_xlsx_for_download(stone_df, metal_df, labor_df):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                if not stone_df.empty: stone_df.to_excel(writer, sheet_name='Stone Summary', index=False)
+                if not metal_df.empty: metal_df.to_excel(writer, sheet_name='Metal Summary', index=False)
+                if not labor_df.empty: labor_df.to_excel(writer, sheet_name='Labor Summary', index=False)
+            return output.getvalue()
+
+        out_stone = pd.DataFrame(stone_rows)
+        out_metal = pd.DataFrame(metal_rows)
+        out_labor = pd.DataFrame(labor_rows)
+        xlsx_data = create_xlsx_for_download(out_stone, out_metal, out_labor)
+        st.download_button(
+            label="Download All Summaries (Excel)",
+            data=xlsx_data,
+            file_name="jewelry_summary.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_all_xlsx"
+        )
