@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -216,7 +215,7 @@ def line_item(df, header, key_prefix):
                 if "Average Weight Per Piece" in avg_row:
                     bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f} ct")
             line2 = " · ".join(bits)
-            st.success(line1 + ("" if not line2 else "  \n" + line2))
+            st.success(line1 + ("" if not line2 else " \n" + line2))
             st.caption(f"Matched rows: {nmatch}")
             with st.expander(f"Preview matched rows ({min(len(preview), 50)} shown)"):
                 st.dataframe(preview.head(50), use_container_width=True, hide_index=True)
@@ -333,7 +332,7 @@ with tab_metal:
         approx_weight = st.number_input("Approximate Metal Weight (grams)", min_value=0.0, value=0.0, step=0.1, key="approx_weight")
 
         st.markdown("*Ounce Prices (USD/oz)*")
-        st.number_input("Gold (USD/oz)",   min_value=0.0, step=1.0,  value=float(ounce_prices["Gold"])   if ounce_prices["Gold"]   else 0.0, key="oz_gold")
+        st.number_input("Gold (USD/oz)",   min_value=0.0, step=1.0,  value=float(ounce_prices["Gold"])    if ounce_prices["Gold"]    else 0.0, key="oz_gold")
         st.number_input("Silver (USD/oz)", min_value=0.0, step=0.1,  value=float(ounce_prices["Silver"]) if ounce_prices["Silver"] else 0.0, key="oz_silver")
         st.number_input("Copper (USD/oz)", min_value=0.0, step=0.01, value=float(ounce_prices["Copper"]) if ounce_prices["Copper"] else 0.0, key="oz_copper")
 
@@ -496,7 +495,7 @@ with tab_labor:
 
         st.markdown("*Setting Costs*")
         set_center = st.number_input("Setting per Center (USD/stone)", min_value=0.0, value=0.0, step=0.5, key="set_center")
-        set_side   = st.number_input("Setting per Side (USD/stone)",   min_value=0.0, value=0.0, step=0.25, key="set_side")
+        set_side   = st.number_input("Setting per Side (USD/stone)",    min_value=0.0, value=0.0, step=0.25, key="set_side")
         set_acc    = st.number_input("Setting per Accent (USD/stone)", min_value=0.0, value=0.0, step=0.10, key="set_acc")
 
         st.markdown("*Plating / Misc*")
@@ -681,4 +680,4 @@ with tab_summary:
             file_name="jewelry_summary.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_all_xlsx"
-        )
+        )
