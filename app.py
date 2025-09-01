@@ -23,12 +23,10 @@ st.markdown(
       .caption-tight {margin-top:-6px;color:#7a7a7a;}
       .hdr {font-weight:600;letter-spacing:.2px;color:#334;}
 
-      /* Custom CSS to prevent partial hiding in tables */
-      .st-b0, .st-b1, .st-b2, .st-b3 {
-        padding: 0.25rem 0.5rem;
-      }
+      /* compact dataframes */
+      .st-b0, .st-b1, .st-b2, .st-b3 { padding: 0.25rem 0.5rem; }
 
-      /* This is the key change to make the cell content visible */
+      /* ensure cell content isn't clipped */
       .stDataFrame td div {
           white-space: nowrap;
           overflow: visible;
@@ -50,7 +48,7 @@ st.caption(
 def load_master(xlsx_path="TEST.xlsx", sheet="MCGI_Master_Price"):
     df = pd.read_excel(xlsx_path, sheet_name=sheet)
     for c in [
-        "Gemstone", "Shape", "Size",
+        "Gemstone", "Shape", "Size", "Cut",          # normalized "Cut" added
         "Color", "Country of Origin", "Stone Treatment",
         "Unit Of Measure", "Price Per Piece US$", "Price Per Carat US$", "Average Weight Per Piece"
     ]:
@@ -248,7 +246,7 @@ def line_item(df, header, key_prefix):
                 if "Average Weight Per Piece" in avg_row:
                     bits.append(f"Avg Wt/pc: {avg_row['Average Weight Per Piece']:.4f} Carats")
             line2 = " · ".join(bits)
-            st.success(line1 + ("" if not line2 else "  \n" + line2))
+            st.success(line1 + ("" if not line2 else "  \n" + line2))
             st.caption(f"Matched rows: {nmatch}")
             with st.expander(f"Preview matched rows ({min(len(preview), 50)} shown)"):
                 st.dataframe(preview.head(50), use_container_width=True, hide_index=True)
@@ -330,15 +328,18 @@ with tab_metal:
                 tickers = {"Gold": "GC=F", "Silver": "SI=F", "Copper": "HG=F"}
                 for m, tkr in tickers.items():
                     t = yf.Ticker(tkr)
-                    info = t.fast_info if hasattr(t, "fast_info") else None
                     px = None
-                    if info and "last_price" in info.__dict__:
-                        px = float(info.last_price)
-                    else:
-                        hist = t.history(period="1d")
-                        if not hist.empty and "Close" in hist.columns:
-                            px = float(hist["Close"].iloc[-1])
-                    if px and isfinite(px):
+                    try:
+                        fi = getattr(t, "fast_info", None)
+                        if fi is not None:
+                            px = float(getattr(fi, "last_price", None) or 0) or None
+                        if px is None:
+                            hist = t.history(period="1d", auto_adjust=False)
+                            if not hist.empty and "Close" in hist.columns:
+                                px = float(hist["Close"].iloc[-1])
+                    except Exception:
+                        px = None
+                    if px is not None and isfinite(px):
                         ounce_prices[m] = px
                 live_note.success("Live ounce prices fetched ✅")
             except Exception as e:
@@ -432,7 +433,7 @@ with tab_metal:
         st.markdown("#### Results")
         densities = {
             "18K": 15.5, "14K": 13.5, "10K": 11.5, "9K": 10.5, "SS925": 10.4,
-            "Brass": 8.73, "Copper": 8.96
+            "Brass": 8.73, "Copper": 8.96, "Steel": 7.90  # Steel density added
         }
         
         def per_gram_silver(oz_price, conv_oz_to_g, silver_yield, silver_finish):
