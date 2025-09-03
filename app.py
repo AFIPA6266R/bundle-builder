@@ -33,9 +33,22 @@ st.caption(
 
 # ---------------- Sidebar: data controls ----------------
 st.sidebar.header("Data Source")
-xlsx_path = st.sidebar.text_input("Excel file path or name", value="TEST.xlsx", help="Example: TEST.xlsx (must be in working directory)")
+xlsx_path = st.sidebar.text_input(
+    "Excel file path or name",
+    value="TEST.xlsx",
+    help="Example: TEST.xlsx (must be in working directory)"
+)
 sheet_name = st.sidebar.text_input("Sheet name", value="MCGI_Master_Price")
-reload_now = st.sidebar.button("Reload data")
+reload_now = st.sidebar.button("Reload product data")
+
+st.sidebar.markdown("---")
+st.sidebar.header("Labor Chart Source")
+labor_xlsx_path = st.sidebar.text_input(
+    "Labor chart Excel path or name",
+    value="Labor_Chart.xlsx",
+    help="Overwrite this file in your repo to update the chart"
+)
+reload_labor_now = st.sidebar.button("Reload labor chart")
 
 # ---------------- Data loading ----------------
 @st.cache_data(show_spinner=False)
@@ -62,6 +75,29 @@ try:
 except Exception as e:
     st.error(f"Failed to load Excel → {e}")
     st.stop()
+
+# Load Labor Chart
+@st.cache_data(show_spinner=False)
+def load_labor_chart(xlsx_path:str):
+    try:
+        # try to find a sheet named 'Labor' then fallback to first sheet
+        xl = pd.ExcelFile(xlsx_path)
+        target_sheet = None
+        for name in xl.sheet_names:
+            if name.strip().lower() in ("labor","labour","labor_chart","lab chart","rates"):
+                target_sheet = name
+                break
+        df_lab = xl.parse(target_sheet or xl.sheet_names[0])
+        # normalize headers for easier matching later
+        df_lab.columns = [str(c).strip() for c in df_lab.columns]
+        return df_lab
+    except Exception as e:
+        return None
+
+if reload_labor_now:
+    load_labor_chart.clear()
+
+labor_chart_df = load_labor_chart(labor_xlsx_path)
 
 # ---------------- Helpers ----------------
 def parse_size(s):
@@ -298,11 +334,9 @@ with tab_metal:
                 for m, tkr in tickers.items():
                     t = yf.Ticker(tkr)
                     px = None
-                    # Try fast_info.last_price first
                     info = getattr(t, "fast_info", None)
                     if info is not None and hasattr(info, "last_price"):
                         px = float(info.last_price)
-                    # Fallback to last close
                     if px is None:
                         hist = t.history(period="1d")
                         if not hist.empty and "Close" in hist.columns:
@@ -449,7 +483,6 @@ with tab_metal:
         st.markdown("---")
         st.markdown("#### Relative Metal Weights (same volume)")
         if approx_weight > 0:
-            # choose base density key
             base_key = purity_choice if metal in ["Gold","Silver"] else metal
             base_density = densities.get(base_key)
             if base_density:
@@ -476,7 +509,66 @@ with tab_metal:
 # -------- Labor (CPF / Setting / Plating) --------
 with tab_labor:
     st.subheader("Labor (CPF, Setting & Plating)")
-    st.caption("Rates sourced from Standard Labor for JTV – Aug. 2025.")
+    st.caption("Rates sourced from your **Labor_Chart.xlsx** reference. Replace the file to update values; use Prefill to apply to inputs.")
+
+    # Reference Labor Chart (read-only table)
+    if labor_chart_df is not None and not labor_chart_df.empty:
+        with st.expander("Reference Labor Chart (read-only)", expanded=True):
+            st.dataframe(labor_chart_df, use_container_width=True, hide_index=True)
+
+        # Row selector for prefill
+        st.markdown("##### Prefill from chart")
+        # Try to build a friendly selector if a 'Product' (or similar) column exists; fall back to row index
+        product_col_candidates = [c for c in labor_chart_df.columns if str(c).strip().lower() in ("product","product type","type","category")]
+        if product_col_candidates:
+            prod_col = product_col_candidates[0]
+            picker_label = f"Select row by {prod_col}"
+            options = labor_chart_df[prod_col].astype(str).tolist()
+            default_idx = 0
+            selected_label = st.selectbox(picker_label, options, index=default_idx, key="labchart_pick_label")
+            sel_row = labor_chart_df[labor_chart_df[prod_col].astype(str) == selected_label].head(1)
+            sel_row = sel_row.iloc[0] if not sel_row.empty else None
+        else:
+            idx_options = [f"Row {i}" for i in labor_chart_df.index.tolist()]
+            idx_choice = st.selectbox("Select chart row", idx_options, index=0, key="labchart_pick_idx")
+            chosen_idx = labor_chart_df.index.tolist()[idx_options.index(idx_choice)]
+            sel_row = labor_chart_df.loc[chosen_idx]
+
+        def _get_num(row, candidates, default=0.0):
+            """Try multiple possible column names, return first numeric value found."""
+            if row is None:
+                return default
+            for name in candidates:
+                if name in labor_chart_df.columns:
+                    try:
+                        val = pd.to_numeric(row[name], errors="coerce")
+                        if pd.notna(val):
+                            return float(val)
+                    except Exception:
+                        pass
+            return default
+
+        # Heuristic column name candidates (feel free to rename columns in your Excel to these)
+        cpf_base_candidates   = ["CPF Base","CPF base","CPF base (USD)","CPF","Casting/Polish/Finish Base"]
+        cpf_wt_candidates     = ["CPF Weight/Gram","CPF weight","Weight Adder","CPF per gram"]
+        set_center_candidates = ["Setting Center","Set Center","Setting per Center","Center Setting"]
+        set_side_candidates   = ["Setting Side","Set Side","Setting per Side","Side Setting"]
+        set_acc_candidates    = ["Setting Accent","Set Accent","Setting per Accent","Accent Setting"]
+        plating_candidates    = ["Plating Flat","Plating flat","Plating","Plating USD"]
+        misc_candidates       = ["Misc Labor","Misc. labor","Misc","Misc USD"]
+
+        # Prefill values pulled from selected row (used as defaults in inputs below)
+        pre_cpf_base = _get_num(sel_row, cpf_base_candidates, 0.0)
+        pre_cpf_wt   = _get_num(sel_row, cpf_wt_candidates, 0.0)
+        pre_set_c    = _get_num(sel_row, set_center_candidates, 0.0)
+        pre_set_s    = _get_num(sel_row, set_side_candidates, 0.0)
+        pre_set_a    = _get_num(sel_row, set_acc_candidates, 0.0)
+        pre_plating  = _get_num(sel_row, plating_candidates, 0.0)
+        pre_misc     = _get_num(sel_row, misc_candidates, 0.0)
+    else:
+        st.info("Labor_Chart.xlsx not found or empty. Add the file to your repo and click **Reload labor chart** in the sidebar.")
+        sel_row = None
+        pre_cpf_base = pre_cpf_wt = pre_set_c = pre_set_s = pre_set_a = pre_plating = pre_misc = 0.0
 
     # derive counts from selections
     center_qty = (st.session_state.center_details or {}).get("qty", 0) or 0
@@ -490,20 +582,24 @@ with tab_labor:
         labor_prod = st.selectbox("Product Type for Labor", ["Ring","Earring","Pendant","Necklace","Bracelet","Bangle"], key="lab_prod")
 
         st.markdown("*CPF (Casting / Polish / Finish)*")
-        cpf_base = st.number_input("CPF base (USD per unit)", min_value=0.0, value=0.0, step=0.5, key="cpf_base")
-        cpf_weight_factor = st.number_input("CPF weight adder (USD per gram)", min_value=0.0, value=0.0, step=0.1, key="cpf_wt")
+        cpf_base = st.number_input("CPF base (USD per unit)", min_value=0.0, value=float(pre_cpf_base), step=0.5, key="cpf_base")
+        cpf_weight_factor = st.number_input("CPF weight adder (USD per gram)", min_value=0.0, value=float(pre_cpf_wt), step=0.1, key="cpf_wt")
 
         st.markdown("*Setting Costs*")
-        set_center = st.number_input("Setting per Center (USD/stone)", min_value=0.0, value=0.0, step=0.5, key="set_center")
-        set_side   = st.number_input("Setting per Side (USD/stone)",    min_value=0.0, value=0.0, step=0.25, key="set_side")
-        set_acc    = st.number_input("Setting per Accent (USD/stone)", min_value=0.0, value=0.0, step=0.10, key="set_acc")
+        set_center = st.number_input("Setting per Center (USD/stone)", min_value=0.0, value=float(pre_set_c), step=0.5, key="set_center")
+        set_side   = st.number_input("Setting per Side (USD/stone)",  min_value=0.0, value=float(pre_set_s), step=0.25, key="set_side")
+        set_acc    = st.number_input("Setting per Accent (USD/stone)", min_value=0.0, value=float(pre_set_a), step=0.10, key="set_acc")
 
         st.markdown("*Plating / Misc*")
-        plating_flat = st.number_input("Plating flat (USD/unit)", min_value=0.0, value=0.0, step=0.5, key="plating_flat")
-        misc_labor   = st.number_input("Misc. labor (USD/unit)", min_value=0.0, value=0.0, step=0.5, key="misc_labor")
+        plating_flat = st.number_input("Plating flat (USD/unit)", min_value=0.0, value=float(pre_plating), step=0.5, key="plating_flat")
+        misc_labor   = st.number_input("Misc. labor (USD/unit)", min_value=0.0, value=float(pre_misc), step=0.5, key="misc_labor")
 
         approx_weight_for_labor = st.number_input(
-            "Approximate metal weight for labor calc (grams)", min_value=0.0, value=st.session_state.get("approx_weight", 0.0), step=0.1, key="labor_weight"
+            "Approximate metal weight for labor calc (grams)",
+            min_value=0.0,
+            value=st.session_state.get("approx_weight", 0.0),
+            step=0.1,
+            key="labor_weight"
         )
 
     with colR:
@@ -641,7 +737,7 @@ with tab_summary:
         labor_df = pd.DataFrame(labor_rows)
         st.markdown("### Labor Summary")
         st.dataframe(labor_df, use_container_width=True, hide_index=True)
-        st.caption("Labor rates per JTV sheet.")
+        st.caption("Labor rates are based on your reference chart selection (you can override any value above).")
     else:
         st.info("No labor has been entered yet.")
 
